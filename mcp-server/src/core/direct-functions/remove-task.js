@@ -12,6 +12,7 @@ import {
 	disableSilentMode,
 	readJSON
 } from '../../../../scripts/modules/utils.js';
+import { removeJiraTask } from '../utils/jira-utils.js';
 
 /**
  * Direct function wrapper for removeTask with error handling.
@@ -156,6 +157,127 @@ export async function removeTaskDirect(args, log) {
 
 		// Catch any unexpected errors
 		log.error(`Unexpected error in removeTaskDirect: ${error.message}`);
+		return {
+			success: false,
+			error: {
+				code: 'UNEXPECTED_ERROR',
+				message: error.message
+			},
+			fromCache: false
+		};
+	}
+}
+
+/**
+ * Direct function wrapper for removing Jira tasks with error handling.
+ * Supports removing multiple Jira tasks at once with comma-separated IDs.
+ *
+ * @param {Object} args - Command arguments
+ * @param {string} args.id - The Jira key(s) of the task(s) or subtask(s) to remove (comma-separated for multiple).
+ * @param {Object} log - Logger object
+ * @returns {Promise<Object>} - Remove task result { success: boolean, data?: any, error?: { code: string, message: string }, fromCache: false }
+ */
+export async function removeJiraTaskDirect(args, log) {
+	// Destructure expected args
+	const { id } = args;
+	
+	try {
+		// Validate task ID parameter
+		if (!id) {
+			log.error('Jira issue key is required');
+			return {
+				success: false,
+				error: {
+					code: 'INPUT_VALIDATION_ERROR',
+					message: 'Jira issue key is required'
+				},
+				fromCache: false
+			};
+		}
+
+		// Split task IDs if comma-separated
+		const taskIdArray = id.split(',').map((taskId) => taskId.trim());
+
+		log.info(
+			`Removing ${taskIdArray.length} Jira issue(s) with key(s): ${taskIdArray.join(', ')}`
+		);
+
+		// Remove tasks one by one
+		const results = [];
+
+		// Enable silent mode to prevent console logs from interfering with JSON response
+		enableSilentMode();
+
+		try {
+			for (const taskId of taskIdArray) {
+				try {
+					const result = await removeJiraTask(taskId, log);
+					if (result.success) {
+						results.push({
+							taskId,
+							success: true,
+							message: result.data.message,
+							removedTask: result.data.removedTask
+						});
+						log.info(`Successfully removed Jira issue: ${taskId}`);
+					} else {
+						results.push({
+							taskId,
+							success: false,
+							error: result.error.message
+						});
+						log.error(`Error removing Jira issue ${taskId}: ${result.error.message}`);
+					}
+				} catch (error) {
+					results.push({
+						taskId,
+						success: false,
+						error: error.message
+					});
+					log.error(`Error removing Jira issue ${taskId}: ${error.message}`);
+				}
+			}
+		} finally {
+			// Restore normal logging
+			disableSilentMode();
+		}
+
+		// Check if all tasks were successfully removed
+		const successfulRemovals = results.filter((r) => r.success);
+		const failedRemovals = results.filter((r) => !r.success);
+
+		if (successfulRemovals.length === 0) {
+			// All removals failed
+			return {
+				success: false,
+				error: {
+					code: 'REMOVE_JIRA_TASK_ERROR',
+					message: 'Failed to remove any Jira issues',
+					details: failedRemovals
+						.map((r) => `${r.taskId}: ${r.error}`)
+						.join('; ')
+				},
+				fromCache: false
+			};
+		}
+
+		// At least some tasks were removed successfully
+		return {
+			success: true,
+			data: {
+				totalIssues: taskIdArray.length,
+				successful: successfulRemovals.length,
+				failed: failedRemovals.length,
+				results: results
+			},
+			fromCache: false
+		};
+	} catch (error) {
+		// Ensure silent mode is disabled even if an outer error occurs
+		disableSilentMode();
+
+		// Catch any unexpected errors
+		log.error(`Unexpected error in removeJiraTaskDirect: ${error.message}`);
 		return {
 			success: false,
 			error: {

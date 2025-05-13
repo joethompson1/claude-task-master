@@ -27,7 +27,7 @@ import { validateDependenciesDirect } from './direct-functions/validate-dependen
 import { fixDependenciesDirect, fixJiraDependenciesDirect } from './direct-functions/fix-dependencies.js';
 import { complexityReportDirect } from './direct-functions/complexity-report.js';
 import { addDependencyDirect, addJiraDependencyDirect } from './direct-functions/add-dependency.js';
-import { removeTaskDirect } from './direct-functions/remove-task.js';
+import { removeTaskDirect, removeJiraTaskDirect } from './direct-functions/remove-task.js';
 import { initializeProjectDirect } from './direct-functions/initialize-project.js';
 import { modelsDirect } from './direct-functions/models.js';
 
@@ -71,6 +71,7 @@ export const directFunctions = new Map([
 	['addDependencyDirect', addDependencyDirect],
 	['addJiraDependencyDirect', addJiraDependencyDirect],
 	['removeTaskDirect', removeTaskDirect],
+	['removeJiraTaskDirect', removeJiraTaskDirect],
 	['initializeProjectDirect', initializeProjectDirect],
 	['modelsDirect', modelsDirect]
 ]);
@@ -112,6 +113,7 @@ export {
 	addDependencyDirect,
 	addJiraDependencyDirect,
 	removeTaskDirect,
+	removeJiraTaskDirect,
 	initializeProjectDirect,
 	modelsDirect
 };
