@@ -10,6 +10,7 @@ import {
 	enableSilentMode,
 	disableSilentMode
 } from '../../../../scripts/modules/utils.js';
+import { findNextJiraTask } from '../utils/jira-utils.js';
 
 /**
  * Direct function wrapper for finding the next task to work on with error handling and caching.
@@ -135,6 +136,73 @@ export async function nextTaskDirect(args, log) {
 			error: {
 				code: 'UNEXPECTED_ERROR',
 				message: error.message
+			},
+			fromCache: false
+		};
+	}
+}
+
+/**
+ * Direct function wrapper for finding the next task to work on with error handling and caching.
+ *
+ * @param {Object} args - Command arguments
+ * @param {Object} log - Logger object
+ * @returns {Promise<Object>} - Next task result { success: boolean, data?: any, error?: { code: string, message: string }, fromCache: boolean }
+ */
+export async function nextJiraTaskDirect(args, log) {
+	try {
+		// Remove cache key creation and directly call the core function
+		log.info(`Finding next task from Jira ${args.parentKey ? `for parent ${args.parentKey}` : ''}`);
+
+		// Enable silent mode to prevent console logs from interfering with JSON response
+		enableSilentMode();
+		
+		try {
+			// Call the findNextJiraTask function with parentKey if provided
+			const result = await findNextJiraTask(args.parentKey, log);
+			
+			if (!result.success) {
+				log.error(`Error finding next task: ${result.error.message}`);
+				return {
+					success: false,
+					error: result.error,
+					fromCache: false
+				};
+			}
+			
+			// If no next task found
+			if (!result.data.nextTask) {
+				log.info('No eligible next task found. All tasks are either completed or have unsatisfied dependencies');
+				return {
+					success: true,
+					data: {
+						message: 'No eligible next task found. All tasks are either completed or have unsatisfied dependencies',
+						nextTask: null,
+					},
+					fromCache: false
+				};
+			}
+			
+			// Return the next task data
+			log.info(`Successfully found next task ${result.data.nextTask.id}: ${result.data.nextTask.title}`);
+			return {
+				success: true,
+				data: {
+					nextTask: result.data.nextTask,
+				},
+				fromCache: false
+			};
+		} finally {
+			// Make sure to restore normal logging even if there's an error
+			disableSilentMode();
+		}
+	} catch (error) {
+		log.error(`Error in nextJiraTaskDirect: ${error.message}`);
+		return {
+			success: false,
+			error: {
+				code: 'DIRECT_FUNCTION_ERROR',
+				message: error.message || 'Failed to find next task'
 			},
 			fromCache: false
 		};
