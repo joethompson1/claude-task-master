@@ -12,7 +12,7 @@ import { updateTasksDirect } from './direct-functions/update-tasks.js';
 import { updateTaskByIdDirect } from './direct-functions/update-task-by-id.js';
 import { updateSubtaskByIdDirect } from './direct-functions/update-subtask-by-id.js';
 import { generateTaskFilesDirect } from './direct-functions/generate-task-files.js';
-import { setTaskStatusDirect } from './direct-functions/set-task-status.js';
+import { setTaskStatusDirect, setJiraTaskStatusDirect } from './direct-functions/set-task-status.js';
 import { showTaskDirect } from './direct-functions/show-task.js';
 import { nextTaskDirect, nextJiraTaskDirect } from './direct-functions/next-task.js';
 import { expandTaskDirect, expandJiraTaskDirect } from './direct-functions/expand-task.js';
@@ -45,6 +45,7 @@ export const directFunctions = new Map([
 	['updateSubtaskByIdDirect', updateSubtaskByIdDirect],
 	['generateTaskFilesDirect', generateTaskFilesDirect],
 	['setTaskStatusDirect', setTaskStatusDirect],
+	['setJiraTaskStatusDirect', setJiraTaskStatusDirect],
 	['showTaskDirect', showTaskDirect],
 	['nextTaskDirect', nextTaskDirect],
 	['nextJiraTaskDirect', nextJiraTaskDirect],
@@ -87,6 +88,7 @@ export {
 	updateSubtaskByIdDirect,
 	generateTaskFilesDirect,
 	setTaskStatusDirect,
+	setJiraTaskStatusDirect,
 	showTaskDirect,
 	nextTaskDirect,
 	nextJiraTaskDirect,

@@ -9,7 +9,7 @@ import {
 	disableSilentMode,
 	isSilentMode
 } from '../../../../scripts/modules/utils.js';
-
+import { setJiraTaskStatus } from '../utils/jira-utils.js';
 /**
  * Direct function wrapper for setTaskStatus with error handling.
  *
@@ -85,6 +85,90 @@ export async function setTaskStatusDirect(args, log) {
 				},
 				fromCache: false // This operation always modifies state and should never be cached
 			};
+			return result;
+		} catch (error) {
+			log.error(`Error setting task status: ${error.message}`);
+			return {
+				success: false,
+				error: {
+					code: 'SET_STATUS_ERROR',
+					message: error.message || 'Unknown error setting task status'
+				},
+				fromCache: false
+			};
+		} finally {
+			// ALWAYS restore normal logging in finally block
+			disableSilentMode();
+		}
+	} catch (error) {
+		// Ensure silent mode is disabled if there was an uncaught error in the outer try block
+		if (isSilentMode()) {
+			disableSilentMode();
+		}
+
+		log.error(`Error setting task status: ${error.message}`);
+		return {
+			success: false,
+			error: {
+				code: 'SET_STATUS_ERROR',
+				message: error.message || 'Unknown error setting task status'
+			},
+			fromCache: false
+		};
+	}
+}
+
+/**
+ * Direct function wrapper for setTaskStatus with error handling.
+ *
+ * @param {Object} args - Command arguments containing id, status.
+ * @param {Object} log - Logger object.
+ * @returns {Promise<Object>} - Result object with success status and data/error information.
+ */
+export async function setJiraTaskStatusDirect(args, log) {
+	// Destructure expected args
+	const { id, status } = args;
+	try {
+		log.info(`Setting task status with args: ${JSON.stringify(args)}`);
+
+		// Check required parameters (id and status)
+		if (!id) {
+			const errorMessage =
+				'No task ID specified. Please provide a task ID to update.';
+			log.error(errorMessage);
+			return {
+				success: false,
+				error: { code: 'MISSING_TASK_ID', message: errorMessage },
+				fromCache: false
+			};
+		}
+
+		if (!status) {
+			const errorMessage =
+				'No status specified. Please provide a new status value.';
+			log.error(errorMessage);
+			return {
+				success: false,
+				error: { code: 'MISSING_STATUS', message: errorMessage },
+				fromCache: false
+			};
+		}
+
+		// Execute core setTaskStatus function
+		const taskId = id;
+		const newStatus = status;
+
+		log.info(`Setting task ${taskId} status to "${newStatus}"`);
+
+		// Call the core function with proper silent mode handling
+		enableSilentMode(); // Enable silent mode before calling core function
+		try {
+			// Call the core function
+			const result = await setJiraTaskStatus(taskId, newStatus, { mcpLog: log });
+
+			log.info(`Successfully set task ${taskId} status to ${newStatus}`);
+
+			// Return success data
 			return result;
 		} catch (error) {
 			log.error(`Error setting task status: ${error.message}`);
