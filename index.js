@@ -112,8 +112,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 	program
 		.command('list')
 		.description('List all tasks')
+		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
+		.option('--parent-key <key>', 'Parent Jira issue key (required if source is jira)')
+		.option('-s, --status <status>', 'Filter by status')
+		.option('--with-subtasks', 'Show subtasks for each task')
 		.action(() => {
-			const child = spawn('node', [devScriptPath, 'list'], {
+			// Parse and forward all arguments from this command to dev.js
+			const args = process.argv.slice(process.argv.indexOf('list') + 1);
+			const child = spawn('node', [devScriptPath, 'list', ...args], {
 				stdio: 'inherit',
 				cwd: process.cwd()
 			});

@@ -11,6 +11,7 @@ import {
 	formatDependenciesWithStatus,
 	createProgressBar
 } from '../ui.js';
+import { JiraClient } from '../../../mcp-server/src/core/utils/jira-client.js';
 
 /**
  * List all tasks
@@ -20,32 +21,71 @@ import {
  * @param {string} outputFormat - Output format (text or json)
  * @returns {Object} - Task list result for json format
  */
-function listTasks(
+async function listTasks(
 	tasksPath,
 	statusFilter,
 	withSubtasks = false,
+	options = {},
 	outputFormat = 'text'
 ) {
 	try {
+		// Handle options parameter - can be a string (for backward compatibility) or object
+		if (typeof options === 'string') {
+			outputFormat = options;
+			options = {};
+		}
+
+		// Extract options
+		const source = options.source || 'local';
+		const parentKey = options.parentKey;
+		
 		// Only display banner for text output
 		if (outputFormat === 'text') {
 			displayBanner();
 		}
 
-		const data = readJSON(tasksPath); // Reads the whole tasks.json
-		if (!data || !data.tasks) {
-			throw new Error(`No valid tasks found in ${tasksPath}`);
-		}
-
-		// Filter tasks by status if specified
-		const filteredTasks =
-			statusFilter && statusFilter.toLowerCase() !== 'all' // <-- Added check for 'all'
+		let data;
+		let filteredTasks;
+		
+		// Handle different data sources
+		if (JiraClient.isJiraEnabled()) {
+			// Import the Jira utilities (use dynamic import to avoid circular dependencies)
+			const jiraUtils = await import('../../mcp-server/src/core/utils/jira-utils.js');
+			
+			// Fetch subtasks from Jira for the specified parent key
+			const jiraData = await jiraUtils.fetchTasksFromJira(parentKey, withSubtasks, {
+				info: (msg) => log('info', msg),
+				error: (msg) => log('error', msg),
+				warn: (msg) => log('warn', msg),
+					debug: (msg) => log('debug', msg)
+			});
+			
+			// Set data and filtered tasks
+			data = jiraData;
+			filteredTasks = statusFilter && statusFilter.toLowerCase() !== 'all'
 				? data.tasks.filter(
-						(task) =>
-							task.status &&
-							task.status.toLowerCase() === statusFilter.toLowerCase()
-					)
-				: data.tasks; // Default to all tasks if no filter or filter is 'all'
+					(task) =>
+						task.status &&
+						task.status.toLowerCase() === statusFilter.toLowerCase()
+				)
+				: data.tasks;
+		} else {
+			// Original local file reading logic
+			data = readJSON(tasksPath); 
+			if (!data || !data.tasks) {
+				throw new Error(`No valid tasks found in ${tasksPath}`);
+			}
+
+			// Filter tasks by status if specified
+			filteredTasks =
+				statusFilter && statusFilter.toLowerCase() !== 'all'
+					? data.tasks.filter(
+							(task) =>
+								task.status &&
+								task.status.toLowerCase() === statusFilter.toLowerCase()
+						)
+					: data.tasks;
+		}
 
 		// Calculate completion statistics
 		const totalTasks = data.tasks.length;
@@ -111,9 +151,8 @@ function listTasks(
 
 		// For JSON output, return structured data
 		if (outputFormat === 'json') {
-			// *** Modification: Remove 'details' field for JSON output ***
+			// Omit 'details' field for JSON output
 			const tasksWithoutDetails = filteredTasks.map((task) => {
-				// <-- USES filteredTasks!
 				// Omit 'details' from the parent task
 				const { details, ...taskRest } = task;
 
@@ -126,11 +165,12 @@ function listTasks(
 				}
 				return taskRest;
 			});
-			// *** End of Modification ***
 
 			return {
-				tasks: tasksWithoutDetails, // <--- THIS IS THE ARRAY BEING RETURNED
-				filter: statusFilter || 'all', // Return the actual filter used
+				tasks: tasksWithoutDetails,
+				filter: statusFilter || 'all',
+				source, // Include the data source in the response
+				sourceInfo: source === 'jira' ? { parentKey } : { tasksPath },
 				stats: {
 					total: totalTasks,
 					completed: doneCount,
@@ -258,7 +298,13 @@ function listTasks(
 		const avgDependenciesPerTask = totalDependencies / data.tasks.length;
 
 		// Find next task to work on
-		const nextItem = findNextTask(data.tasks);
+		const nextTask = findNextTask(data.tasks);
+		const nextTaskInfo = nextTask
+			? `ID: ${chalk.cyan(nextTask.id)} - ${chalk.white.bold(truncate(nextTask.title, 40))}\n` +
+				`Priority: ${chalk.white(nextTask.priority || 'medium')}  Dependencies: ${formatDependenciesWithStatus(nextTask.dependencies, data.tasks, true)}`
+			: chalk.yellow(
+					'No eligible tasks found. All tasks are either completed or have unsatisfied dependencies.'
+				);
 
 		// Get terminal width - more reliable method
 		let terminalWidth;
@@ -301,8 +347,8 @@ function listTasks(
 			`${chalk.blue('•')} ${chalk.white('Avg dependencies per task:')} ${avgDependenciesPerTask.toFixed(1)}\n\n` +
 			chalk.cyan.bold('Next Task to Work On:') +
 			'\n' +
-			`ID: ${chalk.cyan(nextItem ? nextItem.id : 'N/A')} - ${nextItem ? chalk.white.bold(truncate(nextItem.title, 40)) : chalk.yellow('No task available')}\n` +
-			`Priority: ${nextItem ? chalk.white(nextItem.priority || 'medium') : ''}  Dependencies: ${nextItem ? formatDependenciesWithStatus(nextItem.dependencies, data.tasks, true) : ''}`;
+			`ID: ${chalk.cyan(nextTask ? nextTask.id : 'N/A')} - ${nextTask ? chalk.white.bold(truncate(nextTask.title, 40)) : chalk.yellow('No task available')}\n` +
+			`Priority: ${nextTask ? chalk.white(nextTask.priority || 'medium') : ''}  Dependencies: ${nextTask ? formatDependenciesWithStatus(nextTask.dependencies, data.tasks, true) : ''}`;
 
 		// Calculate width for side-by-side display
 		// Box borders, padding take approximately 4 chars on each side
@@ -582,20 +628,12 @@ function listTasks(
 		};
 
 		// Show next task box in a prominent color
-		if (nextItem) {
-			// Prepare subtasks section if they exist (Only tasks have .subtasks property)
+		if (nextTask) {
+			// Prepare subtasks section if they exist
 			let subtasksSection = '';
-			// Check if the nextItem is a top-level task before looking for subtasks
-			const parentTaskForSubtasks = data.tasks.find(
-				(t) => String(t.id) === String(nextItem.id)
-			); // Find the original task object
-			if (
-				parentTaskForSubtasks &&
-				parentTaskForSubtasks.subtasks &&
-				parentTaskForSubtasks.subtasks.length > 0
-			) {
+			if (nextTask.subtasks && nextTask.subtasks.length > 0) {
 				subtasksSection = `\n\n${chalk.white.bold('Subtasks:')}\n`;
-				subtasksSection += parentTaskForSubtasks.subtasks
+				subtasksSection += nextTask.subtasks
 					.map((subtask) => {
 						// Using a more simplified format for subtask status display
 						const status = subtask.status || 'pending';
@@ -610,31 +648,26 @@ function listTasks(
 						};
 						const statusColor =
 							statusColors[status.toLowerCase()] || chalk.white;
-						// Ensure subtask ID is displayed correctly using parent ID from the original task object
-						return `${chalk.cyan(`${parentTaskForSubtasks.id}.${subtask.id}`)} [${statusColor(status)}] ${subtask.title}`;
+						return `${chalk.cyan(`${nextTask.id}.${subtask.id}`)} [${statusColor(status)}] ${subtask.title}`;
 					})
 					.join('\n');
 			}
 
 			console.log(
 				boxen(
-					chalk.hex('#FF8800').bold(
-						// Use nextItem.id and nextItem.title
-						`🔥 Next Task to Work On: #${nextItem.id} - ${nextItem.title}`
-					) +
+					chalk
+						.hex('#FF8800')
+						.bold(
+							`🔥 Next Task to Work On: #${nextTask.id} - ${nextTask.title}`
+						) +
 						'\n\n' +
-						// Use nextItem.priority, nextItem.status, nextItem.dependencies
-						`${chalk.white('Priority:')} ${priorityColors[nextItem.priority || 'medium'](nextItem.priority || 'medium')}   ${chalk.white('Status:')} ${getStatusWithColor(nextItem.status, true)}\n` +
-						`${chalk.white('Dependencies:')} ${nextItem.dependencies && nextItem.dependencies.length > 0 ? formatDependenciesWithStatus(nextItem.dependencies, data.tasks, true) : chalk.gray('None')}\n\n` +
-						// Use nextItem.description (Note: findNextTask doesn't return description, need to fetch original task/subtask for this)
-						// *** Fetching original item for description and details ***
-						`${chalk.white('Description:')} ${getWorkItemDescription(nextItem, data.tasks)}` +
-						subtasksSection + // <-- Subtasks are handled above now
+						`${chalk.white('Priority:')} ${priorityColors[nextTask.priority || 'medium'](nextTask.priority || 'medium')}   ${chalk.white('Status:')} ${getStatusWithColor(nextTask.status, true)}\n` +
+						`${chalk.white('Dependencies:')} ${nextTask.dependencies && nextTask.dependencies.length > 0 ? formatDependenciesWithStatus(nextTask.dependencies, data.tasks, true) : chalk.gray('None')}\n\n` +
+						`${chalk.white('Description:')} ${nextTask.description}` +
+						subtasksSection +
 						'\n\n' +
-						// Use nextItem.id
-						`${chalk.cyan('Start working:')} ${chalk.yellow(`task-master set-status --id=${nextItem.id} --status=in-progress`)}\n` +
-						// Use nextItem.id
-						`${chalk.cyan('View details:')} ${chalk.yellow(`task-master show ${nextItem.id}`)}`,
+						`${chalk.cyan('Start working:')} ${chalk.yellow(`task-master set-status --id=${nextTask.id} --status=in-progress`)}\n` +
+						`${chalk.cyan('View details:')} ${chalk.yellow(`task-master show ${nextTask.id}`)}`,
 					{
 						padding: { left: 2, right: 2, top: 1, bottom: 1 },
 						borderColor: '#FF8800',
