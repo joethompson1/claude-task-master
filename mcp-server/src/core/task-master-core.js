@@ -23,7 +23,7 @@ import { analyzeTaskComplexityDirect, analyzeJiraComplexityDirect } from './dire
 import { clearSubtasksDirect, clearJiraSubtasksDirect } from './direct-functions/clear-subtasks.js';
 import { expandAllTasksDirect, expandAllJiraTasksDirect } from './direct-functions/expand-all-tasks.js';
 import { removeDependencyDirect, removeJiraDependencyDirect } from './direct-functions/remove-dependency.js';
-import { validateDependenciesDirect } from './direct-functions/validate-dependencies.js';
+import { validateDependenciesDirect, validateJiraDependenciesDirect } from './direct-functions/validate-dependencies.js';
 import { fixDependenciesDirect, fixJiraDependenciesDirect } from './direct-functions/fix-dependencies.js';
 import { complexityReportDirect } from './direct-functions/complexity-report.js';
 import { addDependencyDirect, addJiraDependencyDirect } from './direct-functions/add-dependency.js';
@@ -70,6 +70,7 @@ export const directFunctions = new Map([
 	['removeDependencyDirect', removeDependencyDirect],
 	['removeJiraDependencyDirect', removeJiraDependencyDirect],
 	['validateDependenciesDirect', validateDependenciesDirect],
+	['validateJiraDependenciesDirect', validateJiraDependenciesDirect],
 	['fixDependenciesDirect', fixDependenciesDirect],
 	['fixJiraDependenciesDirect', fixJiraDependenciesDirect],
 	['complexityReportDirect', complexityReportDirect],
@@ -117,6 +118,7 @@ export {
 	removeDependencyDirect,
 	removeJiraDependencyDirect,
 	validateDependenciesDirect,
+	validateJiraDependenciesDirect,
 	fixDependenciesDirect,
 	fixJiraDependenciesDirect,
 	complexityReportDirect,
