@@ -9,6 +9,7 @@ import {
 	enableSilentMode,
 	disableSilentMode
 } from '../../../../scripts/modules/utils.js';
+import { JiraClient } from '../utils/jira-client.js';
 
 /**
  * Direct function wrapper for listTasks with error handling and caching.
@@ -19,24 +20,26 @@ import {
  */
 export async function listTasksDirect(args, log) {
 	// Destructure the explicit tasksJsonPath from args
-	const { tasksJsonPath, status, withSubtasks } = args;
+	const { tasksJsonPath, status, withSubtasks, parentKey } = args;
 
-	if (!tasksJsonPath) {
-		log.error('listTasksDirect called without tasksJsonPath');
+	if (!JiraClient.isJiraEnabled() && !tasksJsonPath) {
+		log.error('listTasksDirect called without tasksJsonPath and source is not jira');
 		return {
 			success: false,
 			error: {
 				code: 'MISSING_ARGUMENT',
-				message: 'tasksJsonPath is required'
+				message: 'tasksJsonPath is required when source is not jira'
 			},
 			fromCache: false
 		};
 	}
 
-	// Use the explicit tasksJsonPath for cache key
+	// Use the explicit tasksJsonPath for cache key (or parentKey for Jira)
 	const statusFilter = status || 'all';
 	const withSubtasksFilter = withSubtasks || false;
-	const cacheKey = `listTasks:${tasksJsonPath}:${statusFilter}:${withSubtasksFilter}`;
+	const cacheKey = JiraClient.isJiraEnabled() 
+		? `listTasks:jira:${parentKey}:${statusFilter}:${withSubtasksFilter}`
+		: `listTasks:${tasksJsonPath}:${statusFilter}:${withSubtasksFilter}`;
 
 	// Define the action function to be executed on cache miss
 	const coreListTasksAction = async () => {
@@ -45,13 +48,19 @@ export async function listTasksDirect(args, log) {
 			enableSilentMode();
 
 			log.info(
-				`Executing core listTasks function for path: ${tasksJsonPath}, filter: ${statusFilter}, subtasks: ${withSubtasksFilter}`
+				JiraClient.isJiraEnabled()
+					? `Executing core listTasks function for Jira parent: ${parentKey}, filter: ${statusFilter}, subtasks: ${withSubtasksFilter}`
+					: `Executing core listTasks function for path: ${tasksJsonPath}, filter: ${statusFilter}, subtasks: ${withSubtasksFilter}`
 			);
-			// Pass the explicit tasksJsonPath to the core function
-			const resultData = listTasks(
+			
+			// Pass the explicit tasksJsonPath and options to the core function
+			const resultData = await listTasks(
 				tasksJsonPath,
 				statusFilter,
 				withSubtasksFilter,
+				{
+					parentKey: parentKey
+				},
 				'json'
 			);
 
@@ -66,7 +75,7 @@ export async function listTasksDirect(args, log) {
 				};
 			}
 			log.info(
-				`Core listTasks function retrieved ${resultData.tasks.length} tasks`
+				`Core listTasks function retrieved ${resultData.tasks.length} tasks from ${JiraClient.isJiraEnabled() ? 'Jira' : 'local'} source`
 			);
 
 			// Restore normal logging
@@ -110,3 +119,4 @@ export async function listTasksDirect(args, log) {
 		};
 	}
 }
+
