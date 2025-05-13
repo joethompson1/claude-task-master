@@ -10,6 +10,7 @@ import {
 	disableSilentMode
 } from '../../../../scripts/modules/utils.js';
 import { findTasksJsonPath } from '../utils/path-utils.js';
+import { fetchJiraTaskDetails } from '../utils/jira-utils.js';
 
 /**
  * Direct function wrapper for getting task details.
@@ -96,6 +97,62 @@ export async function showTaskDirect(args, log) {
 			error: {
 				code: 'TASK_OPERATION_ERROR',
 				message: error.message
+			}
+		};
+	}
+}
+
+/**
+ * Direct function wrapper for showing Jira task details with error handling.
+ *
+ * @param {Object} args - Command arguments
+ * @param {string} args.id - The Jira issue key to show details for.
+ * @param {boolean} [args.withSubtasks=false] - If true, will fetch subtasks for the parent task
+ * @param {Object} log - Logger object
+ * @returns {Promise<Object>} - Task details result { success: boolean, data?: any, error?: { code: string, message: string } }
+ */
+export async function showJiraTaskDirect(args, log) {
+	// Destructure expected args
+	const { id } = args;
+
+	// Validate task ID
+	const taskId = id;
+	if (!taskId) {
+		log.error('Task ID is required');
+		return {
+			success: false,
+			error: {
+				code: 'INPUT_VALIDATION_ERROR',
+				message: 'Task ID is required'
+			}
+		};
+	}
+
+	try {
+		// Enable silent mode to prevent console logs from interfering with JSON response
+		enableSilentMode();
+
+		log.info(`Retrieving task details for Jira issue: ${taskId}`);
+		
+		// Use the dedicated function from jira-utils.js to fetch task details
+		const jiraTaskResult = await fetchJiraTaskDetails(taskId, args.withSubtasks, log);
+		
+		// Restore normal logging before returning
+		disableSilentMode();
+		
+		// Return the result directly as it's already in the expected format
+		log.info(`showJiraTaskDirect completed for issue: ${taskId}`);
+		return jiraTaskResult;
+	} catch (error) {
+		// Make sure to restore normal logging even if there's an error
+		disableSilentMode();
+
+		log.error(`Error showing Jira task: ${error.message}`);
+		return {
+			success: false,
+			error: {
+				code: 'CORE_FUNCTION_ERROR',
+				message: error.message || 'Failed to show Jira task details'
 			}
 		};
 	}
