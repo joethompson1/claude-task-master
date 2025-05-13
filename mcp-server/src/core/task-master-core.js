@@ -10,7 +10,7 @@ import { getCacheStatsDirect } from './direct-functions/cache-stats.js';
 import { parsePRDDirect, parsePRDWithJiraDirect } from './direct-functions/parse-prd.js';
 import { updateTasksDirect } from './direct-functions/update-tasks.js';
 import { updateTaskByIdDirect } from './direct-functions/update-task-by-id.js';
-import { updateSubtaskByIdDirect } from './direct-functions/update-subtask-by-id.js';
+import { updateSubtaskByIdDirect, updateJiraSubtaskByIdDirect } from './direct-functions/update-subtask-by-id.js';
 import { generateTaskFilesDirect } from './direct-functions/generate-task-files.js';
 import { setTaskStatusDirect, setJiraTaskStatusDirect } from './direct-functions/set-task-status.js';
 import { showTaskDirect, showJiraTaskDirect } from './direct-functions/show-task.js';
@@ -43,6 +43,7 @@ export const directFunctions = new Map([
 	['updateTasksDirect', updateTasksDirect],
 	['updateTaskByIdDirect', updateTaskByIdDirect],
 	['updateSubtaskByIdDirect', updateSubtaskByIdDirect],
+	['updateJiraSubtaskByIdDirect', updateJiraSubtaskByIdDirect],
 	['generateTaskFilesDirect', generateTaskFilesDirect],
 	['setTaskStatusDirect', setTaskStatusDirect],
 	['setJiraTaskStatusDirect', setJiraTaskStatusDirect],
@@ -87,6 +88,7 @@ export {
 	updateTasksDirect,
 	updateTaskByIdDirect,
 	updateSubtaskByIdDirect,
+	updateJiraSubtaskByIdDirect,
 	generateTaskFilesDirect,
 	setTaskStatusDirect,
 	setJiraTaskStatusDirect,
