@@ -9,6 +9,8 @@ import {
 	disableSilentMode
 } from '../../../../scripts/modules/utils.js';
 import { createLogWrapper } from '../../tools/utils.js';
+import { createJiraIssue } from '../utils/jira-utils.js';
+import { JiraTicket } from '../utils/jira-ticket.js';
 
 /**
  * Direct function wrapper for adding a new task with error handling.
@@ -172,3 +174,95 @@ export async function addTaskDirect(args, log, context = {}) {
 		};
 	}
 }
+
+
+
+/**
+ * Create a top-level Jira task, optionally linked to an Epic
+ * @param {Object} args - Function arguments
+ * @param {string} args.title - The title/summary for the new task
+ * @param {string} [args.issueType] - The issue type for the task (default: Task, Epic, Story, Bug, Subtask)
+ * @param {string} [args.description] - The description for the task
+ * @param {string} [args.details] - The implementation details for the task
+ * @param {string} [args.testStrategy] - The test strategy for the task
+ * @param {string} [args.acceptanceCriteria] - The acceptance criteria for the task
+ * @param {string} [args.parentKey] - The Jira key of the Epic/parent to link this task to (e.g., 'PROJ-5')
+ * @param {string} [args.priority] - Jira priority name (e.g., "Medium", "High")
+ * @param {string} [args.assignee] - Jira account ID or email of the assignee
+ * @param {string[]} [args.labels] - List of labels to add
+ * @param {Object} log - Logger object
+ * @param {Object} [context={}] - Additional context (e.g., session)
+ * @returns {Promise<Object>} - Result object with success status and data/error
+ */
+export async function addJiraTaskDirect(args, log, context = {}) {
+    try {
+        // Extract parameters from args
+        const { 
+            title, 
+            issueType,
+            description,
+			details,
+			acceptanceCriteria,
+			testStrategy,
+            parentKey,
+            priority, 
+            assignee, 
+            labels
+        } = args;
+        
+        // Validate required parameters
+        if (!title) {
+            return {
+                success: false,
+                error: {
+                    code: 'MISSING_PARAMETER',
+                    message: 'Task title/summary is required'
+                }
+            };
+        }
+        
+        log.info(`Creating Jira task with title "${title}"`);
+        
+        if (parentKey) {
+            log.info(`Task will be linked to parent/epic: ${parentKey}`);
+        }
+
+        // Use the JiraTicket class to manage the ticket data and ADF conversion
+        const jiraTicket = new JiraTicket({
+            title: title,
+            description: description,
+			details: details,
+			acceptanceCriteria: acceptanceCriteria,
+			testStrategy: testStrategy,
+			parentKey: parentKey,
+            priority: priority ? priority.charAt(0).toUpperCase() + priority.slice(1) : 'Medium',
+            issueType: issueType || 'Task',
+            assignee: assignee,
+            labels: labels
+        });
+
+		// Call the createJiraIssue function with 'Task' as the issue type
+        const result = await createJiraIssue(
+            jiraTicket,
+            log
+        );
+        
+        // Return the result directly
+        return result;
+    } catch (error) {
+        // Log the error
+        log.error(`Error in addJiraTaskDirect: ${error.message}`);
+        
+        // Return structured error response
+        return {
+            success: false,
+            error: {
+                code: 'DIRECT_FUNCTION_ERROR',
+                message: error.message,
+                details: error.stack,
+                // Preserve any displayMessage from the error object
+                displayMessage: error.error?.displayMessage || error.message
+            }
+        };
+    }
+} 
