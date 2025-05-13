@@ -8,7 +8,7 @@
 import { listTasksDirect } from './direct-functions/list-tasks.js';
 import { getCacheStatsDirect } from './direct-functions/cache-stats.js';
 import { parsePRDDirect, parsePRDWithJiraDirect } from './direct-functions/parse-prd.js';
-import { updateTasksDirect } from './direct-functions/update-tasks.js';
+import { updateTasksDirect, updateJiraTasksDirect } from './direct-functions/update-tasks.js';
 import { updateTaskByIdDirect, updateJiraTaskByIdDirect } from './direct-functions/update-task-by-id.js';
 import { updateSubtaskByIdDirect, updateJiraSubtaskByIdDirect } from './direct-functions/update-subtask-by-id.js';
 import { generateTaskFilesDirect } from './direct-functions/generate-task-files.js';
@@ -41,6 +41,7 @@ export const directFunctions = new Map([
 	['parsePRDDirect', parsePRDDirect],
 	['parsePRDWithJiraDirect', parsePRDWithJiraDirect],
 	['updateTasksDirect', updateTasksDirect],
+	['updateJiraTasksDirect', updateJiraTasksDirect],
 	['updateTaskByIdDirect', updateTaskByIdDirect],
 	['updateJiraTaskByIdDirect', updateJiraTaskByIdDirect],
 	['updateSubtaskByIdDirect', updateSubtaskByIdDirect],
@@ -87,6 +88,7 @@ export {
 	parsePRDDirect,
 	parsePRDWithJiraDirect,
 	updateTasksDirect,
+	updateJiraTasksDirect,
 	updateTaskByIdDirect,
 	updateJiraTaskByIdDirect,
 	updateSubtaskByIdDirect,

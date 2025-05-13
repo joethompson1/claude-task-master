@@ -6,7 +6,7 @@
 import path from 'path';
 import { updateTasks } from '../../../../scripts/modules/task-manager.js';
 import { createLogWrapper } from '../../tools/utils.js';
-
+import { updateJiraIssues } from '../utils/jira-utils.js';
 /**
  * Direct function wrapper for updating tasks based on new context.
  *
@@ -120,5 +120,110 @@ export async function updateTasksDirect(args, log, context = {}) {
 		};
 	} finally {
 		disableSilentMode(); // Ensure silent mode is disabled
+	}
+}
+
+/**
+ * Direct function wrapper for updating tasks based on new context/prompt.
+ *
+ * @param {Object} args - Command arguments containing fromId, prompt, useResearch and tasksJsonPath.
+ * @param {Object} log - Logger object.
+ * @param {Object} context - Context object containing session data.
+ * @returns {Promise<Object>} - Result object with success status and data/error information.
+ */
+export async function updateJiraTasksDirect(args, log, context = {}) {
+	const { session } = context; // Only extract session, not reportProgress
+	const { taskIds, prompt, research } = args;
+
+	try {
+		log.info(`Updating Jira tasks with args: ${JSON.stringify(args)}`);
+
+		// Check required parameters
+		if (!taskIds || !Array.isArray(taskIds) || taskIds.length === 0) {
+			const errorMessage = 'No task IDs specified. Please provide an array of Jira task IDs to update.';
+			log.error(errorMessage);
+			return {
+				success: false,
+				error: { code: 'MISSING_TASK_IDS', message: errorMessage },
+				fromCache: false
+			};
+		}
+
+		if (!prompt) {
+			const errorMessage = 'No prompt specified. Please provide a prompt with new context for task updates.';
+			log.error(errorMessage);
+			return {
+				success: false,
+				error: { code: 'MISSING_PROMPT', message: errorMessage },
+				fromCache: false
+			};
+		}
+
+		// Get research flag
+		const useResearch = research === true;
+
+		log.info(
+			`Updating ${taskIds.length} Jira tasks with prompt "${prompt}" and research: ${useResearch}`
+		);
+
+		// Create the logger wrapper to ensure compatibility with core functions
+		const logWrapper = {
+			info: (message, ...args) => log.info(message, ...args),
+			warn: (message, ...args) => log.warn(message, ...args),
+			error: (message, ...args) => log.error(message, ...args),
+			debug: (message, ...args) => log.debug && log.debug(message, ...args), // Handle optional debug
+			success: (message, ...args) => log.info(message, ...args) // Map success to info if needed
+		};
+
+		try {
+			// Enable silent mode to prevent console logs from interfering with JSON response
+			enableSilentMode();
+
+			// Execute core updateJiraTasks function, passing the AI client and session
+			const result = await updateJiraIssues(taskIds, prompt, useResearch, {
+				mcpLog: logWrapper, // Pass the wrapper instead of the raw log object
+				session
+			});
+
+			// Return success message with details from the core function result
+			return {
+				success: true,
+				data: {
+					message: result.message || `Successfully updated Jira tasks based on the prompt`,
+					taskIds,
+					updateCount: result.results?.length || 0,
+					successCount: result.results?.filter(r => r.success).length || 0,
+					results: result.results || [],
+					useResearch
+				},
+				fromCache: false // This operation always modifies state and should never be cached
+			};
+		} catch (error) {
+			log.error(`Error updating Jira tasks: ${error.message}`);
+			return {
+				success: false,
+				error: {
+					code: 'UPDATE_JIRA_TASKS_ERROR',
+					message: error.message || 'Unknown error updating Jira tasks'
+				},
+				fromCache: false
+			};
+		} finally {
+			// Make sure to restore normal logging even if there's an error
+			disableSilentMode();
+		}
+	} catch (error) {
+		// Ensure silent mode is disabled
+		disableSilentMode();
+
+		log.error(`Error updating Jira tasks: ${error.message}`);
+		return {
+			success: false,
+			error: {
+				code: 'UPDATE_JIRA_TASKS_ERROR',
+				message: error.message || 'Unknown error updating Jira tasks'
+			},
+			fromCache: false
+		};
 	}
 }
