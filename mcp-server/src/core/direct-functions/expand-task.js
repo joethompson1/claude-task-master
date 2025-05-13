@@ -14,6 +14,13 @@ import {
 import path from 'path';
 import fs from 'fs';
 import { createLogWrapper } from '../../tools/utils.js';
+import {
+	getAnthropicClientForMCP,
+} from '../utils/ai-client-utils.js';
+import { 
+	fetchJiraTaskDetails, 
+	expandJiraTask, 
+} from '../utils/jira-utils.js';
 
 /**
  * Direct function wrapper for expanding a task into subtasks with error handling.
@@ -249,6 +256,147 @@ export async function expandTaskDirect(args, log, context = {}) {
 			error: {
 				code: 'CORE_FUNCTION_ERROR',
 				message: error.message || 'Failed to expand task'
+			},
+			fromCache: false
+		};
+	}
+}
+
+/**
+ * Direct function wrapper for expanding a task into subtasks with error handling.
+ *
+ * @param {Object} args - Command arguments
+ * @param {string} args.id - The ID of the jira task to expand.
+ * @param {number|string} [args.num] - Number of subtasks to generate.
+ * @param {boolean} [args.research] - Enable Perplexity AI for research-backed subtask generation.
+ * @param {string} [args.prompt] - Additional context to guide subtask generation.
+ * @param {boolean} [args.force] - Force expansion even if subtasks exist.
+ * @param {Object} log - Logger object
+ * @param {Object} context - Context object containing session and reportProgress
+ * @returns {Promise<Object>} - Task expansion result { success: boolean, data?: any, error?: { code: string, message: string }, fromCache: boolean }
+ */
+export async function expandJiraTaskDirect(args, log, context = {}) {
+	const { session } = context;
+	// Destructure expected args
+	const { id, num, research, prompt, force } = args;
+
+	// Log session data for debugging
+	log.info(
+		`Session data in expandJiraTaskDirect: ${JSON.stringify({
+			hasSession: !!session,
+			sessionKeys: session ? Object.keys(session) : [],
+			roots: session?.roots,
+			rootsStr: JSON.stringify(session?.roots)
+		})}`
+	);
+	
+	// Validate task ID
+	if (!id) {
+		log.error('Jira task ID is required');
+		return {
+			success: false,
+			error: {
+				code: 'INPUT_VALIDATION_ERROR',
+				message: 'Jira task ID is required'
+			},
+			fromCache: false
+		};
+	}
+
+	// Process other parameters
+	const numSubtasks = num ? parseInt(num, 10) : undefined;
+	const useResearch = research === true;
+	const additionalContext = prompt || '';
+	const forceFlag = force === true;
+
+	// Initialize AI client if needed
+	try {
+		if (useResearch) {
+			log.info('Verifying AI client for research-backed expansion');
+			await getAnthropicClientForMCP(session, log);
+		}
+	} catch (error) {
+		log.error(`Failed to initialize AI client: ${error.message}`);
+		return {
+			success: false,
+			error: {
+				code: 'AI_CLIENT_ERROR',
+				message: `Cannot initialize AI client: ${error.message}`
+			},
+			fromCache: false
+		};
+	}
+
+	try {
+		log.info(
+			`[expandJiraTaskDirect] Expanding Jira task ${id} into ${numSubtasks || 'default'} subtasks. Research: ${useResearch}`
+		);
+
+		// Process the request to expand the Jira task
+		try {
+			enableSilentMode();
+			// Call expandJiraTask with session context to ensure AI client is properly initialized
+			const result = await expandJiraTask(
+				id,
+				numSubtasks,
+				useResearch,
+				additionalContext,
+				{ mcpLog: log, session } // Only pass mcpLog and session, NOT reportProgress
+			);
+
+			if (!result.success) {
+				return result;
+			}
+
+			// Restore normal logging
+			disableSilentMode();
+			
+			// Get the updated task details (if available)
+			let updatedTask;
+			try {
+				const updatedTaskDetails = await fetchJiraTaskDetails(id, true, log);
+				updatedTask = updatedTaskDetails.success ? updatedTaskDetails.data.task : null;
+			} catch (fetchError) {
+				log.warn(`Could not fetch updated task details: ${fetchError.message}`);
+				// Continue with the result we have
+			}
+			
+			// Calculate subtasks info from what we have available
+			const subtasksData = result.data.subtasks || [];
+			const subtasksCount = result.data.subtasksCount || subtasksData.length;
+			
+			// Return the result
+			log.info(
+				`Successfully expanded Jira task ${id} with ${subtasksCount} new subtasks`
+			);
+			
+			return {
+				success: true,
+				data: {
+					task: updatedTask || result.data.task,
+					subtasksAdded: subtasksCount,
+					subtasks: subtasksData
+				},
+				fromCache: false
+			};
+		} catch (error) {
+			log.error(`Error expanding Jira task: ${error.message}`);
+			return {
+				success: false,
+				error: {
+					code: 'JIRA_EXPANSION_ERROR',
+					message: error.message || 'Failed to expand Jira task'
+				},
+				fromCache: false
+			};
+		}
+	} catch (error) {
+		log.error(`Error in expandJiraTaskDirect: ${error.message}`);
+		return {
+			success: false,
+			error: {
+				code: 'JIRA_EXPANSION_ERROR',
+				message: error.message || 'Failed to expand Jira task'
 			},
 			fromCache: false
 		};
