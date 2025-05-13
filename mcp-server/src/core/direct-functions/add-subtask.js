@@ -7,6 +7,8 @@ import {
 	enableSilentMode,
 	disableSilentMode
 } from '../../../../scripts/modules/utils.js';
+import { createJiraIssue } from '../utils/jira-utils.js';
+import { JiraTicket } from '../utils/jira-ticket.js';
 
 /**
  * Add a subtask to an existing task
@@ -162,4 +164,99 @@ export async function addSubtaskDirect(args, log) {
 			}
 		};
 	}
+}
+
+
+
+/**
+ * Create a Jira subtask under a specified parent issue
+ * @param {Object} args - Function arguments
+ * @param {string} args.parentKey - The Jira key of the parent issue (e.g., "PROJ-123")
+ * @param {string} args.title - The title/summary for the new subtask
+ * @param {string} [args.description] - The description for the subtask
+ * @param {string} [args.details] - The implementation details for the subtask
+ * @param {string} [args.acceptanceCriteria] - The acceptance criteria for the subtask
+ * @param {string} [args.testStrategy] - The test strategy for the subtask
+ * @param {string} [args.priority] - Jira priority name (e.g., "Medium", "High")
+ * @param {string} [args.assignee] - Jira account ID or email of the assignee
+ * @param {string[]} [args.labels] - List of labels to add
+ * @param {Object} log - Logger object
+ * @param {Object} [context={}] - Additional context (e.g., session)
+ * @returns {Promise<Object>} - Result object with success status and data/error
+ */
+export async function addJiraSubtaskDirect(args, log, context = {}) {
+    try {
+        // Extract parameters from args
+        const { 
+            parentKey, 
+            title, 
+            description,
+			details,
+			acceptanceCriteria,
+			testStrategy,
+            priority, 
+            assignee, 
+            labels
+        } = args;
+        
+        // Validate required parameters
+        if (!parentKey) {
+            return {
+                success: false,
+                error: {
+                    code: 'MISSING_PARAMETER',
+                    message: 'Parent issue key (parentKey) is required'
+                }
+            };
+        }
+        
+        if (!title) {
+            return {
+                success: false,
+                error: {
+                    code: 'MISSING_PARAMETER',
+                    message: 'Subtask title/summary is required'
+                }
+            };
+        }
+        
+        log.info(`Creating Jira subtask under parent ${parentKey} with title "${title}"`);
+
+		const jiraTicket = new JiraTicket({
+			title: title,
+			description: description,
+			details: details,
+			acceptanceCriteria: acceptanceCriteria,
+			testStrategy: testStrategy,
+			priority: priority,
+			assignee: assignee,
+			labels: labels,
+			parentKey: parentKey,
+			issueType: 'Subtask'
+		});
+        
+        // Call the refactored function with 'Subtask' as the issue type
+        const result = await createJiraIssue(
+            jiraTicket,
+            log
+        );
+        
+        // Return the result directly
+        return result;
+    } catch (error) {
+        // Log the error
+        log.error(`Error in addJiraSubtaskDirect: ${error.message}`);
+        
+        // Return structured error response
+        return {
+            success: false,
+            error: {
+                code: 'DIRECT_FUNCTION_ERROR',
+                message: error.message,
+                details: error.stack,
+                // Preserve any displayMessage from the error object
+                displayMessage: error.error?.displayMessage || error.message
+            }
+        };
+    }
 }
