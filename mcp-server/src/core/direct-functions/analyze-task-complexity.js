@@ -198,3 +198,101 @@ export async function analyzeTaskComplexityDirect(args, log, context = {}) {
 		};
 	}
 }
+
+/**
+ * Analyze task complexity of Jira tasks and generate recommendations
+ * @param {Object} args - Function arguments
+ * @param {string} [args.parentKey] - Parent Jira issue key to filter tasks
+ * @param {string} args.outputPath - Explicit absolute path to save the report.
+ * @param {string} [args.model] - LLM model to use for analysis
+ * @param {string|number} [args.threshold] - Minimum complexity score to recommend expansion (1-10)
+ * @param {boolean} [args.research] - Use Perplexity AI for research-backed complexity analysis
+ * @param {Object} log - Logger object
+ * @param {Object} [context={}] - Context object containing session data
+ * @returns {Promise<{success: boolean, data?: Object, error?: {code: string, message: string}}>}
+ */
+export async function analyzeJiraComplexityDirect(args, log, context = {}) {
+	const { session } = context; // Only extract session, not reportProgress
+	// Destructure expected args
+	const { parentKey, outputPath, model, threshold, research } = args;
+
+	try {
+		log.info(`Analyzing Jira task complexity with args: ${JSON.stringify(args)}`);
+
+		// Check if outputPath was provided
+		if (!outputPath) {
+			log.error('analyzeJiraComplexityDirect called without outputPath');
+			return {
+				success: false,
+				error: { code: 'MISSING_ARGUMENT', message: 'outputPath is required' }
+			};
+		}
+
+		// Import analyzeJiraTaskComplexity from jira-utils.js
+		const { analyzeJiraTaskComplexity } = await import('../utils/jira-utils.js');
+
+		// Create options object for analyzeJiraTaskComplexity
+		const options = {
+			model: model
+		};
+
+		// Convert threshold to a number if it's a string
+		const thresholdValue = typeof threshold === 'string' ? parseFloat(threshold) : threshold;
+
+		log.info(`Analyzing Jira task complexity from: ${parentKey || 'all tasks'}`);
+		log.info(`Output report will be saved to: ${outputPath}`);
+
+		if (research) {
+			log.info('Using Perplexity AI for research-backed complexity analysis');
+		}
+
+		// Enable silent mode to prevent console logs from interfering with JSON response
+		const wasSilent = isSilentMode();
+		if (!wasSilent) {
+			enableSilentMode();
+		}
+
+		// Create a logWrapper that matches the expected log interface
+		const logWrapper = {
+			info: (message, ...args) => log.info(message, ...args),
+			warn: (message, ...args) => log.warn(message, ...args),
+			error: (message, ...args) => log.error(message, ...args),
+			debug: (message, ...args) => log.debug && log.debug(message, ...args),
+			success: (message, ...args) => log.info(message, ...args) // Map success to info
+		};
+
+		try {
+			// Call the Jira utility function
+			const result = await analyzeJiraTaskComplexity(
+				parentKey, 
+				thresholdValue || 5, 
+				research === true, 
+				outputPath, 
+				options,
+				logWrapper,
+				{ session }
+			);
+
+			return result;
+
+		} catch (error) {
+			log.error(`Error in analyzeJiraTaskComplexity: ${error.message}`);
+			return {
+				success: false,
+				error: {
+					code: 'ANALYZE_ERROR',
+					message: `Error running Jira complexity analysis: ${error.message}`
+				}
+			};
+		}
+	} catch (error) {
+		log.error(`Error in analyzeJiraComplexityDirect: ${error.message}`);
+		return {
+			success: false,
+			error: {
+				code: 'CORE_FUNCTION_ERROR',
+				message: error.message
+			}
+		};
+	}
+}

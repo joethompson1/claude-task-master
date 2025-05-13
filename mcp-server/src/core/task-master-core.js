@@ -19,7 +19,7 @@ import { expandTaskDirect } from './direct-functions/expand-task.js';
 import { addTaskDirect, addJiraTaskDirect } from './direct-functions/add-task.js';
 import { addSubtaskDirect, addJiraSubtaskDirect } from './direct-functions/add-subtask.js';
 import { removeSubtaskDirect } from './direct-functions/remove-subtask.js';
-import { analyzeTaskComplexityDirect } from './direct-functions/analyze-task-complexity.js';
+import { analyzeTaskComplexityDirect, analyzeJiraComplexityDirect } from './direct-functions/analyze-task-complexity.js';
 import { clearSubtasksDirect } from './direct-functions/clear-subtasks.js';
 import { expandAllTasksDirect } from './direct-functions/expand-all-tasks.js';
 import { removeDependencyDirect } from './direct-functions/remove-dependency.js';
@@ -53,6 +53,7 @@ export const directFunctions = new Map([
 	['addJiraSubtaskDirect', addJiraSubtaskDirect],
 	['removeSubtaskDirect', removeSubtaskDirect],
 	['analyzeTaskComplexityDirect', analyzeTaskComplexityDirect],
+	['analyzeJiraComplexityDirect', analyzeJiraComplexityDirect],
 	['clearSubtasksDirect', clearSubtasksDirect],
 	['expandAllTasksDirect', expandAllTasksDirect],
 	['removeDependencyDirect', removeDependencyDirect],
@@ -85,6 +86,7 @@ export {
 	addJiraSubtaskDirect,
 	removeSubtaskDirect,
 	analyzeTaskComplexityDirect,
+	analyzeJiraComplexityDirect,
 	clearSubtasksDirect,
 	expandAllTasksDirect,
 	removeDependencyDirect,
