@@ -7,6 +7,7 @@ import {
 	enableSilentMode,
 	disableSilentMode
 } from '../../../../scripts/modules/utils.js';
+import { removeJiraSubtask } from '../utils/jira-utils.js';
 
 /**
  * Remove a subtask from its parent task
@@ -111,6 +112,64 @@ export async function removeSubtaskDirect(args, log) {
 		disableSilentMode();
 
 		log.error(`Error in removeSubtaskDirect: ${error.message}`);
+		return {
+			success: false,
+			error: {
+				code: 'CORE_FUNCTION_ERROR',
+				message: error.message
+			}
+		};
+	}
+}
+
+/**
+ * Remove a subtask from its parent task
+ * @param {Object} args - Function arguments
+ * @param {string} args.id - Subtask ID in format "PROJ-123" (required)
+ * @param {boolean} [args.convert] - Whether to convert the subtask to a standalone task
+ * @param {Object} log - Logger object
+ * @returns {Promise<{success: boolean, data?: Object, error?: {code: string, message: string}}>}
+ */
+export async function removeJiraSubtaskDirect(args, log) {
+	// Destructure expected args
+	const { id, convert } = args;
+	try {
+		// Enable silent mode to prevent console logs from interfering with JSON response
+		enableSilentMode();
+
+		log.info(`Removing subtask with args: ${JSON.stringify(args)}`);
+
+		if (!id) {
+			disableSilentMode(); // Disable before returning
+			return {
+				success: false,
+				error: {
+					code: 'INPUT_VALIDATION_ERROR',
+					message: 'Subtask ID is required'
+				}
+			};
+		}
+
+		// Convert convertToTask to a boolean
+		const convertToTask = convert === true;
+
+		log.info(
+			`Removing Jira subtask ${id} (convertToTask: ${convertToTask})`
+		);
+
+		// Call the Jira utility function to remove the subtask
+		const result = await removeJiraSubtask(id, convertToTask, log);
+
+		// Restore normal logging
+		disableSilentMode();
+
+		// Return the result directly as it already has the correct structure
+		return result;
+	} catch (error) {
+		// Ensure silent mode is disabled even if an outer error occurs
+		disableSilentMode();
+
+		log.error(`Error in removeJiraSubtaskDirect: ${error.message}`);
 		return {
 			success: false,
 			error: {
