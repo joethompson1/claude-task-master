@@ -9,8 +9,9 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { showTaskDirect } from '../core/task-master-core.js';
+import { showTaskDirect, showJiraTaskDirect } from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
+import { JiraClient } from '../core/utils/jira-client.js';
 
 /**
  * Custom processor function that removes allTasks from the response
@@ -37,79 +38,132 @@ function processTaskResponse(data) {
  * @param {Object} server - FastMCP server instance
  */
 export function registerShowTaskTool(server) {
-	server.addTool({
-		name: 'get_task',
-		description: 'Get detailed information about a specific task',
-		parameters: z.object({
-			id: z.string().describe('Task ID to get'),
-			status: z
-				.string()
-				.optional()
-				.describe("Filter subtasks by status (e.g., 'pending', 'done')"),
-			file: z
-				.string()
-				.optional()
-				.describe('Path to the tasks file relative to project root'),
-			projectRoot: z
-				.string()
-				.optional()
-				.describe(
-					'Absolute path to the project root directory (Optional, usually from session)'
-				)
-		}),
-		execute: withNormalizedProjectRoot(async (args, { log }) => {
-			const { id, file, status, projectRoot } = args;
-
-			try {
-				log.info(
-					`Getting task details for ID: ${id}${status ? ` (filtering subtasks by status: ${status})` : ''} in root: ${projectRoot}`
-				);
-
-				// Resolve the path to tasks.json using the NORMALIZED projectRoot from args
-				let tasksJsonPath;
+	if (!JiraClient.isJiraEnabled()) {
+		server.addTool({
+			name: 'get_task',
+			description: 'Get detailed information about a specific task',
+			parameters: z.object({
+				id: z.string().describe('Task ID to get'),
+				status: z
+					.string()
+					.optional()
+					.describe("Filter subtasks by status (e.g., 'pending', 'done')"),
+				file: z
+					.string()
+					.optional()
+					.describe('Path to the tasks file relative to project root'),
+				projectRoot: z
+					.string()
+					.optional()
+					.describe(
+						'Absolute path to the project root directory (Optional, usually from session)'
+					)
+			}),
+			execute: withNormalizedProjectRoot(async (args, { log }) => {
+				const { id, file, status, projectRoot } = args;
+	
 				try {
-					tasksJsonPath = findTasksJsonPath(
-						{ projectRoot: projectRoot, file: file },
+					log.info(
+						`Getting task details for ID: ${id}${status ? ` (filtering subtasks by status: ${status})` : ''} in root: ${projectRoot}`
+					);
+	
+					// Resolve the path to tasks.json using the NORMALIZED projectRoot from args
+					let tasksJsonPath;
+					try {
+						tasksJsonPath = findTasksJsonPath(
+							{ projectRoot: projectRoot, file: file },
+							log
+						);
+						log.info(`Resolved tasks path: ${tasksJsonPath}`);
+					} catch (error) {
+						log.error(`Error finding tasks.json: ${error.message}`);
+						return createErrorResponse(
+							`Failed to find tasks.json: ${error.message}`
+						);
+					}
+	
+					// Call the direct function, passing the normalized projectRoot
+					const result = await showTaskDirect(
+						{
+							tasksJsonPath: tasksJsonPath,
+							id: id,
+							status: status,
+							projectRoot: projectRoot
+						},
 						log
 					);
-					log.info(`Resolved tasks path: ${tasksJsonPath}`);
+	
+					if (result.success) {
+						log.info(
+							`Successfully retrieved task details for ID: ${args.id}${result.fromCache ? ' (from cache)' : ''}`
+						);
+					} else {
+						log.error(`Failed to get task: ${result.error.message}`);
+					}
+	
+					// Use our custom processor function
+					return handleApiResult(
+						result,
+						log,
+						'Error retrieving task details',
+						processTaskResponse
+					);
 				} catch (error) {
-					log.error(`Error finding tasks.json: ${error.message}`);
-					return createErrorResponse(
-						`Failed to find tasks.json: ${error.message}`
-					);
+					log.error(`Error in get-task tool: ${error.message}\n${error.stack}`);
+					return createErrorResponse(`Failed to get task: ${error.message}`);
 				}
+			})
+		});
+	} else {
+		server.addTool({
+			name: 'get_jira_task',
+			description: 'Get detailed information about a specific Jira task',
+			parameters: z.object({
+				id: z.string().describe('Task ID to get (Important: Make sure to include the project prefix, e.g. PROJ-123)'),
+				withSubtasks: z
+					.boolean()
+					.optional()
+					.default(false)
+					.describe('If true, will fetch subtasks for the parent task')
+			}),
+			execute: async (args, { log, session }) => {
+				// Log the session right at the start of execute
+				log.info(
+					`Session object received in execute: ${JSON.stringify(session)}`
+				); // Use JSON.stringify for better visibility
 
-				// Call the direct function, passing the normalized projectRoot
-				const result = await showTaskDirect(
-					{
-						tasksJsonPath: tasksJsonPath,
-						id: id,
-						status: status,
-						projectRoot: projectRoot
-					},
-					log
-				);
+				try {
+					log.info(`Getting Jira task details for ID: ${args.id}`);
 
-				if (result.success) {
-					log.info(
-						`Successfully retrieved task details for ID: ${args.id}${result.fromCache ? ' (from cache)' : ''}`
+					const result = await showJiraTaskDirect(
+						{
+							// Only need to pass the ID for Jira tasks
+							id: args.id,
+							withSubtasks: args.withSubtasks
+						},
+						log
 					);
-				} else {
-					log.error(`Failed to get task: ${result.error.message}`);
-				}
 
-				// Use our custom processor function
-				return handleApiResult(
-					result,
-					log,
-					'Error retrieving task details',
-					processTaskResponse
-				);
-			} catch (error) {
-				log.error(`Error in get-task tool: ${error.message}\n${error.stack}`);
-				return createErrorResponse(`Failed to get task: ${error.message}`);
+					if (result.success) {
+						log.info(
+							`Successfully retrieved Jira task details for ID: ${args.id}${result.fromCache ? ' (from cache)' : ''}`
+						);
+					} else {
+						log.error(`Failed to get Jira task: ${result.error.message}`);
+					}
+
+					// Use our custom processor function to remove allTasks from the response
+					return handleApiResult(
+						result,
+						log,
+						'Error retrieving Jira task details',
+						processTaskResponse
+					);
+				} catch (error) {
+					log.error(`Error in get-jira-task tool: ${error.message}\n${error.stack}`); // Add stack trace
+					return createErrorResponse(`Failed to get Jira task: ${error.message}`);
+				}
 			}
-		})
-	});
+		});
+	}
 }
