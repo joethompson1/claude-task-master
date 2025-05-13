@@ -337,7 +337,37 @@ function formatDependenciesWithStatus(
 		// This case is typically handled elsewhere (in task-specific code) before calling this function
 
 		// For regular task dependencies (not subtasks)
-		// Convert string depId to number if needed
+		// Handle Jira-style IDs (containing non-numeric characters) differently
+		if (typeof depId === 'string' && !/^\d+$/.test(depId)) {
+			// This is likely a Jira ID like "JAR-144" - try to find it directly
+			const depTask = allTasks.find((t) => t.id === depId);
+
+			if (!depTask) {
+				return forConsole
+					? chalk.red(`${depIdStr} (Not found)`)
+					: `${depIdStr} (Not found)`;
+			}
+
+			// Format with status
+			const status = depTask.status || 'pending';
+			const isDone =
+				status.toLowerCase() === 'done' || status.toLowerCase() === 'completed';
+			const isInProgress = status.toLowerCase() === 'in-progress';
+
+			if (forConsole) {
+				if (isDone) {
+					return chalk.green.bold(depIdStr);
+				} else if (isInProgress) {
+					return chalk.yellow.bold(depIdStr);
+				} else {
+					return chalk.red.bold(depIdStr);
+				}
+			}
+
+			return depIdStr;
+		}
+
+		// Convert string depId to number only for numeric IDs
 		const numericDepId =
 			typeof depId === 'string' ? parseInt(depId, 10) : depId;
 
