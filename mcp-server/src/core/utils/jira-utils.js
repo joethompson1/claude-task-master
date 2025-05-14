@@ -1094,6 +1094,8 @@ export async function expandJiraTask(taskId, numSubtasks, useResearch = false, a
 		
 		// Create each subtask in Jira
 		const createdSubtasks = [];
+		const issueKeyMap = new Map(); // Map subtask ID to Jira issue key for dependency linking
+		
 		for (let i = 0; i < generatedSubtasks.length; i++) {
 			const subtask = generatedSubtasks[i];
 			
@@ -1115,12 +1117,15 @@ export async function expandJiraTask(taskId, numSubtasks, useResearch = false, a
 				const createResult = await createJiraIssue(jiraTicket, mcpLog);
 				
 				if (createResult.success) {
+					const jiraKey = createResult.data.key;
 					createdSubtasks.push({
 						...subtask,
-						id: createResult.data.key,
-						jiraKey: createResult.data.key
+						id: jiraKey,
+						jiraKey: jiraKey
 					});
-					report(`Successfully created subtask: ${createResult.data.key}`);
+					// Store the mapping from subtask.id to Jira issue key for dependency linking
+					issueKeyMap.set(subtask.id, jiraKey);
+					report(`Successfully created subtask: ${jiraKey}`);
 				} else {
 					report(`Failed to create subtask: ${createResult.error?.message || 'Unknown error'}`);
 				}
@@ -1130,14 +1135,70 @@ export async function expandJiraTask(taskId, numSubtasks, useResearch = false, a
 			}
 		}
 		
+		// Add dependency links between subtasks
+		report(`Setting up dependencies between subtasks...`);
+		const jiraClient = new JiraClient();
+		const client = jiraClient.getClient();
+		const dependencyLinks = [];
+		
+		// Process each subtask with dependencies
+		for (const subtask of generatedSubtasks) {
+			if (subtask.dependencies && Array.isArray(subtask.dependencies) && subtask.dependencies.length > 0) {
+				const dependentIssueKey = issueKeyMap.get(subtask.id);
+				
+				if (dependentIssueKey) {
+					for (const dependencyId of subtask.dependencies) {
+						// Skip dependency on "0" which is often used as a placeholder
+						if (dependencyId === 0) continue;
+						
+						const dependencyKey = issueKeyMap.get(dependencyId);
+						
+						if (dependencyKey) {
+							report(`Linking issue ${dependentIssueKey} to depend on ${dependencyKey}`);
+							
+							try {
+								// Create issue link using Jira REST API
+								// "Blocks" link type means the dependency blocks the dependent issue
+								const linkPayload = {
+									type: {
+										name: "Blocks" // Common link type - this issue blocks the dependent issue
+									},
+									inwardIssue: {
+										key: dependencyKey
+									},
+									outwardIssue: {
+										key: dependentIssueKey
+									}
+								};
+								
+								await client.post('/rest/api/3/issueLink', linkPayload);
+								
+								dependencyLinks.push({
+									from: dependentIssueKey,
+									to: dependencyKey
+								});
+								
+								report(`Created dependency link from ${dependentIssueKey} to ${dependencyKey}`);
+							} catch (error) {
+								report(`Error creating dependency link from ${dependentIssueKey} to ${dependencyKey}: ${error.message}`, 'error');
+							}
+						} else {
+							report(`Dependency subtask ID ${dependencyId} not found in created issues`, 'warn');
+						}
+					}
+				}
+			}
+		}
+		
 		// Return the results
 		return {
 			success: true,
 			data: {
-				message: `Created ${createdSubtasks.length} subtasks for Jira task ${taskId}`,
+				message: `Created ${createdSubtasks.length} subtasks for Jira task ${taskId} with ${dependencyLinks.length} dependency links`,
 				taskId,
 				subtasksCount: createdSubtasks.length,
-				subtasks: createdSubtasks
+				subtasks: createdSubtasks,
+				dependencyLinks
 			}
 		};
 		
