@@ -175,7 +175,7 @@ Do not include ANY explanatory text, markdown, or code block markers. Just the J
  * @returns {Array} Parsed and potentially corrected subtasks array.
  * @throws {Error} If parsing fails or JSON is invalid/malformed.
  */
-function parseSubtasksFromText(
+export function parseSubtasksFromText(
 	text,
 	startId,
 	expectedCount,

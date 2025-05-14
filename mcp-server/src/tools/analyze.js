@@ -14,13 +14,12 @@ import {
 import { analyzeTaskComplexityDirect } from '../core/task-master-core.js'; // Assuming core functions are exported via task-master-core.js
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
-import path from 'path';
 
 /**
- * Register the analyze tool with the MCP server
+ * Register the analyze_project_complexity tool
  * @param {Object} server - FastMCP server instance
  */
-export function registerAnalyzeTool(server) {
+export function registerAnalyzeProjectComplexityTool(server) {
 	if (!JiraClient.isJiraEnabled()) {
 		server.addTool({
 			name: 'analyze_project_complexity',

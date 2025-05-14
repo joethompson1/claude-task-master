@@ -50,7 +50,7 @@ async function listTasks(
 		// Handle different data sources
 		if (JiraClient.isJiraEnabled()) {
 			// Import the Jira utilities (use dynamic import to avoid circular dependencies)
-			const jiraUtils = await import('../../mcp-server/src/core/utils/jira-utils.js');
+			const jiraUtils = await import('../../../mcp-server/src/core/utils/jira-utils.js');
 			
 			// Fetch subtasks from Jira for the specified parent key
 			const jiraData = await jiraUtils.fetchTasksFromJira(parentKey, withSubtasks, {
