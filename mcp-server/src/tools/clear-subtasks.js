@@ -93,11 +93,10 @@ export function registerClearSubtasksTool(server) {
 						.string()
 						.optional()
 						.describe('Parent Jira issue key to clear subtasks from'),
-					all: z.boolean().optional().describe('Clear subtasks from all parent issues')
 				})
-				.refine((data) => data.parentKey || data.all, {
-					message: "Either 'parentKey' or 'all' parameter must be provided",
-					path: ['parentKey', 'all']
+				.refine((data) => data.parentKey, {
+					message: "Either 'parentKey' parameter must be provided",
+					path: ['parentKey']
 				}),
 			execute: async (args, { log, session }) => {
 				try {
@@ -106,7 +105,7 @@ export function registerClearSubtasksTool(server) {
 					const result = await clearJiraSubtasksDirect(
 						{
 							parentKey: args.parentKey,
-							all: args.all
+							all: false
 						},
 						log,
 						{ session }
