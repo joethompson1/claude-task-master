@@ -13,7 +13,7 @@ import inquirer from 'inquirer';
 import ora from 'ora'; // Import ora
 import Table from 'cli-table3';
 
-import { CONFIG, log, readJSON } from './utils.js';
+import { log, readJSON } from './utils.js';
 import {
 	parsePRD,
 	updateTasks,
@@ -46,13 +46,11 @@ import {
 } from './dependency-manager.js';
 
 import {
-	isApiKeySet,
 	getDebugFlag,
 	getConfig,
 	writeConfig,
-	ConfigurationError,
-	isConfigFilePresent,
-	getAvailableModels
+	getAvailableModels,
+	getDefaultSubtasks
 } from './config-manager.js';
 
 import {
@@ -870,7 +868,7 @@ function registerCommands(programInstance) {
 					}
 				} catch (error) {
 					console.error(chalk.red(`Error updating Jira issues: ${error.message}`));
-					if (CONFIG.debug) {
+					if (getDebugFlag()) {
 						console.error(error);
 					}
 					process.exit(1);
@@ -982,7 +980,7 @@ function registerCommands(programInstance) {
 						await updateJiraIssues(issueKey, prompt, useResearch, { log });
 					} catch (error) {
 						console.error(chalk.red(`Error updating Jira issue: ${error.message}`));
-						if (CONFIG.debug) {
+						if (getDebugFlag()) {
 							console.error(error);
 						}
 						process.exit(1);
@@ -1085,7 +1083,7 @@ function registerCommands(programInstance) {
 					);
 				}
 
-				if (CONFIG.debug) {
+				if (getDebugFlag()) {
 					console.error(error);
 				}
 
@@ -1180,7 +1178,7 @@ function registerCommands(programInstance) {
 						await updateJiraIssues(subtaskKey, prompt, useResearch, { log, parentKey });
 					} catch (error) {
 						console.error(chalk.red(`Error updating Jira subtask: ${error.message}`));
-						if (CONFIG.debug) {
+						if (getDebugFlag()) {
 							console.error(error);
 						}
 						process.exit(1);
@@ -1287,7 +1285,7 @@ function registerCommands(programInstance) {
 					);
 				}
 
-				if (CONFIG.debug) {
+				if (getDebugFlag()) {
 					console.error(error);
 				}
 
@@ -1412,7 +1410,7 @@ function registerCommands(programInstance) {
 		.option(
 			'-n, --num <number>',
 			'Number of subtasks to generate',
-			CONFIG.defaultSubtasks.toString()
+			getDefaultSubtasks().toString()
 		)
 		.option(
 			'--research',
@@ -1434,7 +1432,7 @@ function registerCommands(programInstance) {
 		)
 		.action(async (options) => {
 			const idArg = options.id;
-			const numSubtasks = options.num || CONFIG.defaultSubtasks;
+			const numSubtasks = options.num || getDefaultSubtasks();
 			const useResearch = options.research || false;
 			const additionalContext = options.prompt || '';
 			const forceFlag = options.force || false;
@@ -1667,7 +1665,7 @@ function registerCommands(programInstance) {
 					}
 				} catch (error) {
 					console.error(chalk.red(`Error analyzing Jira issue complexity: ${error.message}`));
-					if (CONFIG.debug) {
+					if (getDebugFlag()) {
 						console.error(error);
 					}
 					process.exit(1);
@@ -1775,7 +1773,7 @@ function registerCommands(programInstance) {
 					}
 				} catch (error) {
 					console.error(chalk.red(`Error clearing Jira subtasks: ${error.message}`));
-					if (CONFIG.debug) {
+					if (getDebugFlag()) {
 						console.error(error);
 					}
 					process.exit(1);
@@ -2018,7 +2016,7 @@ function registerCommands(programInstance) {
 				}
 			} catch (error) {
 				console.error(chalk.red(`Error adding task: ${error.message}`));
-				if (error.stack && CONFIG.debug) {
+				if (error.stack && getDebugFlag()) {
 					console.error(error.stack);
 				}
 				process.exit(1);
@@ -2798,7 +2796,7 @@ function registerCommands(programInstance) {
 							console.log('  4. Try with simpler values for title and description');
 						}
 						
-						if (CONFIG.debug) {
+						if (getDebugFlag()) {
 							console.log(chalk.yellow('\nJira API arguments:'));
 							console.log(JSON.stringify(args, null, 2));
 							
@@ -2844,7 +2842,7 @@ function registerCommands(programInstance) {
 					}
 				} catch (error) {
 					console.error(chalk.red(`Error creating Jira subtask: ${error.message}`));
-					if (CONFIG.debug) {
+					if (getDebugFlag()) {
 						console.error(error);
 					}
 					process.exit(1);
@@ -3097,7 +3095,7 @@ function registerCommands(programInstance) {
 					}
 				} catch (error) {
 					console.error(chalk.red(`Error removing Jira subtask: ${error.message}`));
-					if (CONFIG.debug) {
+					if (getDebugFlag()) {
 						console.error(error);
 					}
 					process.exit(1);
@@ -3379,7 +3377,7 @@ function registerCommands(programInstance) {
 					}
 				} catch (error) {
 					console.error(chalk.red(`Error removing Jira issues: ${error.message}`));
-					if (CONFIG.debug) {
+					if (getDebugFlag()) {
 						console.error(error);
 					}
 					process.exit(1);
@@ -3635,7 +3633,7 @@ function setupCLI() {
 			} catch (error) {
 				// Silently fall back to default version
 			}
-			return CONFIG.projectVersion; // Default fallback
+			return 'unknown'; // Default fallback
 		})
 		.helpOption('-h, --help', 'Display help')
 		.addHelpCommand(false) // Disable default help command
@@ -3665,7 +3663,7 @@ function setupCLI() {
  */
 async function checkForUpdate() {
 	// Get current version from package.json
-	let currentVersion = CONFIG.projectVersion;
+	let currentVersion = 'unknown';
 	try {
 		// Try to get the version from the installed package
 		const packageJsonPath = path.join(
@@ -3826,7 +3824,7 @@ async function runCLI(argv = process.argv) {
 	} catch (error) {
 		console.error(chalk.red(`Error: ${error.message}`));
 
-		if (CONFIG.debug) {
+		if (getDebugFlag()) {
 			console.error(error);
 		}
 

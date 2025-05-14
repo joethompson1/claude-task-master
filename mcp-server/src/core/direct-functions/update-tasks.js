@@ -182,7 +182,8 @@ export async function updateJiraTasksDirect(args, log, context = {}) {
 			// Execute core updateJiraTasks function, passing the AI client and session
 			const result = await updateJiraIssues(taskIds, prompt, useResearch, {
 				mcpLog: logWrapper, // Pass the wrapper instead of the raw log object
-				session
+				session,
+				projectRoot
 			});
 
 			// Return success message with details from the core function result

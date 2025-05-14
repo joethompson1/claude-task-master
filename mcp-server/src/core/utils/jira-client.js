@@ -6,7 +6,6 @@
  */
 
 import axios from 'axios';
-import { CONFIG } from '../../../../scripts/modules/utils.js';
 import { JiraTicket } from './jira-ticket.js';
 
 /**
@@ -39,10 +38,10 @@ export class JiraClient {
 	 */
 	static getJiraConfig() {
 		return {
-			baseUrl: process.env.JIRA_API_URL || CONFIG.jiraApiUrl,
-			email: process.env.JIRA_EMAIL || CONFIG.jiraEmail,
-			apiToken: process.env.JIRA_API_TOKEN || CONFIG.jiraApiToken,
-			project: process.env.JIRA_PROJECT || CONFIG.jiraProject,
+			baseUrl: process.env.JIRA_API_URL,
+			email: process.env.JIRA_EMAIL,
+			apiToken: process.env.JIRA_API_TOKEN,
+			project: process.env.JIRA_PROJECT,
 		};
 	}
 

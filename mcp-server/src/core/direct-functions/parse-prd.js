@@ -16,6 +16,7 @@ import { getDefaultNumTasks } from '../../../../scripts/modules/config-manager.j
 import { createJiraIssue } from '../utils/jira-utils.js';
 import { JiraClient } from '../utils/jira-client.js';
 import { JiraTicket } from '../utils/jira-ticket.js';
+import { generateObjectService } from '../../../../scripts/modules/ai-services-unified.js';
 
 /**
  * Direct function wrapper for parsing PRD documents and generating tasks.
@@ -236,9 +237,6 @@ export async function parsePRDWithJiraDirect(args, log, context = {}) {
 			success: (message, ...args) => log.info(message, ...args) // Map success to info
 		};
 
-		// Get model config from session
-		const modelConfig = getModelConfig(session);
-
 		// Enable silent mode to prevent console logs from interfering with JSON response
 		enableSilentMode();
 
@@ -246,38 +244,93 @@ export async function parsePRDWithJiraDirect(args, log, context = {}) {
 		log.info(`Reading PRD content from: ${args.prd}`);
 		const prdContent = args.prd;
 
-		// Call Claude to generate tasks
-		log.info(`Calling Claude to generate ${numTasks} tasks...`);
-		let tasksData;
-		try {
-			tasksData = await callClaude(
-				prdContent,
-				null,
-				numTasks,
-				0,
-				{ mcpLog: logWrapper, session },
-				aiClient,
-				modelConfig
+		// Build system prompt for PRD parsing
+		const systemPrompt = `You are an AI assistant specialized in analyzing Product Requirements Documents (PRDs) and generating a structured, logically ordered, dependency-aware and sequenced list of development tasks in JSON format.
+Analyze the provided PRD content and generate approximately ${numTasks} top-level development tasks. If the complexity or the level of detail of the PRD is high, generate more tasks relative to the complexity of the PRD
+Each task should represent a logical unit of work needed to implement the requirements and focus on the most direct and effective way to implement the requirements without unnecessary complexity or overengineering. Include pseudo-code, implementation details, and test strategy for each task. Find the most up to date information to implement each task.
+Assign sequential IDs starting from ${nextId}. Infer title, description, details, and test strategy for each task based *only* on the PRD content.
+Set status to 'pending', dependencies to an empty array [], and priority to 'medium' initially for all tasks.
+Respond ONLY with a valid JSON object containing a single key "tasks", where the value is an array of task objects adhering to the provided Zod schema. Do not include any explanation or markdown formatting.
+
+Each task should follow this JSON structure:
+{
+	"id": 1,
+	"title": "Example Task Title",
+	"description": "Detailed description of the task (if needed you can use markdown formatting, e.g. headings, lists, etc.)",
+	"acceptanceCriteria": "Detailed acceptance criteria for the task following typical Gherkin syntax",
+	"status": "pending",
+	"dependencies": [0],
+	"priority": "high",
+	"details": "Detailed implementation guidance",
+	"testStrategy": "A Test Driven Development (TDD) approach for validating this task. Always specify TDD tests for each task if possible."
+},
+
+Guidelines:
+1. Unless complexity warrants otherwise, create exactly ${numTasks} tasks, numbered sequentially starting from ${nextId}
+2. Each task should be atomic and focused on a single responsibility following the most up to date best practices and standards
+3. Order tasks logically - consider dependencies and implementation sequence
+4. Early tasks should focus on setup, core functionality first, then advanced features
+5. Include clear validation/testing approach for each task
+6. Set appropriate dependency IDs (a task can only depend on tasks with lower IDs, potentially including existing tasks with IDs less than ${nextId} if applicable)
+7. Assign priority (high/medium/low) based on criticality and dependency order
+8. Include detailed implementation guidance in the "details" field
+9. If the PRD contains specific requirements for libraries, database schemas, frameworks, tech stacks, or any other implementation details, STRICTLY ADHERE to these requirements in your task breakdown and do not discard them under any circumstance
+10. Focus on filling in any gaps left by the PRD or areas that aren't fully specified, while preserving all explicit requirements
+11. Always aim to provide the most direct path to implementation, avoiding over-engineering or roundabout approaches`;
+
+		// Build user prompt with PRD content
+		const userPrompt = `Here's the Product Requirements Document (PRD) to break down into approximately ${numTasks} tasks, starting IDs from ${nextId}:\n\n${prdContent}\n\n
+
+		Return your response in this format:
+{
+    "tasks": [
+        {
+            "id": 1,
+            "title": "Setup Project Repository",
+            "description": "...",
+            ...
+        },
+        ...
+    ],
+    "metadata": {
+        "projectName": "PRD Implementation",
+        "totalTasks": ${numTasks},
+        "sourceFile": "${prdPath}",
+        "generatedAt": "YYYY-MM-DD"
+    }
+}`;
+
+		// Call generateObjectService with the CORRECT schema
+		const generatedData = await generateObjectService({
+			role: 'main',
+			session: session,
+			projectRoot: projectRoot,
+			schema: prdResponseSchema,
+			objectName: 'tasks_data',
+			systemPrompt: systemPrompt,
+			prompt: userPrompt,
+			reportProgress
+		});
+
+		// Validate and Process Tasks
+		if (!generatedData || !Array.isArray(generatedData.tasks)) {
+			// This error *shouldn't* happen if generateObjectService enforced prdResponseSchema
+			// But keep it as a safeguard
+			log.error(
+				`Internal Error: generateObjectService returned unexpected data structure: ${JSON.stringify(generatedData)}`
 			);
-		} catch (error) {
-			log.error(`Error calling Claude to generate tasks: ${error.message}`);
-			return {
-				success: false,
-				error: {
-					code: 'AI_PROCESSING_ERROR',
-					message: `Error generating tasks from PRD: ${error.message}`
-				},
-				fromCache: false
-			};
+			throw new Error(
+				'AI service returned unexpected data structure after validation.'
+			);
 		}
 
 		// Create Jira issues for each task
-		log.info(`Creating ${tasksData.tasks.length} Jira issues...`);
+		log.info(`Creating ${generatedData.tasks.length} Jira issues...`);
 		const issueType = args.jiraIssueType || 'Task';
 		const createdIssues = [];
 		const issueKeyMap = new Map(); // Map task ID to Jira issue key
 		
-		for (const task of tasksData.tasks) {
+		for (const task of generatedData.tasks) {
 			log.info(`Creating Jira issue for task ${task.id}: ${task.title}`);
 			
 			// Use the JiraTicket class to manage the ticket data and ADF conversion
@@ -329,7 +382,7 @@ export async function parsePRDWithJiraDirect(args, log, context = {}) {
 		log.info('Processing task dependencies...');
 		const dependencyLinks = [];
 		
-		for (const task of tasksData.tasks) {
+		for (const task of generatedData.tasks) {
 			if (task.dependencies && task.dependencies.length > 0) {
 				const issueKey = issueKeyMap.get(task.id);
 				
@@ -391,7 +444,7 @@ export async function parsePRDWithJiraDirect(args, log, context = {}) {
 			success: true,
 			data: {
 				message: `Successfully created ${createdIssues.length} Jira issues from PRD`,
-				taskCount: tasksData.tasks.length,
+				taskCount: generatedData.tasks.length,
 				issuesCreated: createdIssues.length,
 				jiraIssueType: issueType,
 				parentIssue: args.jiraParentIssue,

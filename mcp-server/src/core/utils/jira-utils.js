@@ -2,10 +2,11 @@
  * jira-utils.js
  * Utility functions for interacting with Jira API
  */
-import { CONFIG } from '../../../../scripts/modules/utils.js';
-import { generateTaskUpdates } from '../../../../scripts/modules/ai-services.js';
-import { JiraTicket } from './jira-ticket.js';
+import { generateTextService } from '../../../../scripts/modules/ai-services-unified.js';
 import { isSilentMode } from '../../../../scripts/modules/utils.js';
+import { startLoadingIndicator, stopLoadingIndicator } from '../../../../scripts/modules/ui.js';
+import { parseSubtasksFromText } from '../../../../scripts/modules/task-manager/expand-task.js';
+import { JiraTicket } from './jira-ticket.js';
 import { JiraClient } from './jira-client.js';
 
 /**
@@ -494,10 +495,6 @@ export async function setJiraTaskStatus(taskId, newStatus, options = {}) {
 			options.mcpLog.error(errorMessage);
 		} else {
 			console.error(errorMessage);
-			
-			if (CONFIG.debug) {
-				console.error(error);
-			}
 		}
 		
 		// In MCP mode, return error object
@@ -643,12 +640,7 @@ export async function findNextJiraTask(parentKey, log) {
  * @returns {Promise} - Result object with success status and updated issue details
  */
 export async function updateJiraIssues(issueIds, prompt, useResearch = false, options = {}) {
-    // Get logger from options or use console.log
-    const log = options.mcpLog || {
-        info: (message) => console.log(message),
-        warn: (message) => console.warn(message),
-        error: (message) => console.error(message)
-    };
+    const { session, log = console, projectRoot } = options;
     
     try {
 		// Check if Jira is enabled using the JiraClient
@@ -729,13 +721,34 @@ export async function updateJiraIssues(issueIds, prompt, useResearch = false, op
         
         log.info(`Found ${tasks.length} issue(s) to update (${Object.values(issueTypeMap).filter(i => i.isSubtask).length} subtasks)`);
         
-        // Generate task updates using the shared function
-        const updates = await generateTaskUpdates({
-            tasks,
-            prompt,
-            useResearch,
-            options
-        });
+		const systemPrompt = `You are an AI assistant helping to update software development tasks based on new context.
+You will be given a set of tasks and a prompt describing changes or new implementation details.
+Your job is to update the tasks to reflect these changes, while preserving their basic structure.
+
+Guidelines:
+1. Maintain the same IDs, statuses, and dependencies unless specifically mentioned in the prompt
+2. Update titles, descriptions, details, and test strategies to reflect the new information
+3. Do not change anything unnecessarily - just adapt what needs to change based on the prompt
+4. You should return ALL the tasks in order, not just the modified ones
+5. Return a complete valid JSON object with the updated tasks array
+6. VERY IMPORTANT: Preserve all subtasks marked as "done" or "completed" - do not modify their content
+7. For tasks with completed subtasks, build upon what has already been done rather than rewriting everything
+8. If an existing completed subtask needs to be changed/undone based on the new context, DO NOT modify it directly
+9. Instead, add a new subtask that clearly indicates what needs to be changed or replaced
+10. Use the existence of completed subtasks as an opportunity to make new subtasks more specific and targeted
+
+The changes described in the prompt should be applied to ALL tasks in the list.`;
+
+		const role = useResearch ? 'research' : 'main';
+		const userPrompt = `Here are the tasks to update:\n${tasks}\n\nPlease update these tasks based on the following new context:\n${prompt}\n\nIMPORTANT: In the tasks JSON above, any subtasks with "status": "done" or "status": "completed" should be preserved exactly as is. Build your changes around these completed items.\n\nReturn only the updated tasks as a valid JSON array.`;
+
+		let updates = await generateTextService({
+			prompt: userPrompt,
+			systemPrompt: systemPrompt,
+			role,
+			session,
+			projectRoot
+		});
         
         if (!updates || !Array.isArray(updates)) {
             throw new Error('Failed to generate valid updates');
@@ -1620,5 +1633,170 @@ export async function analyzeJiraTaskComplexity(parentKey, threshold = 5, useRes
 				message: error.message
 			}
 		};
+	}
+}
+
+/**
+ * Generate subtasks for a task
+ * @param {Object} task - Task to generate subtasks for
+ * @param {number} numSubtasks - Number of subtasks to generate
+ * @param {number} nextSubtaskId - Next subtask ID
+ * @param {string} additionalContext - Additional context
+ * @param {Object} options - Options object containing:
+ *   - reportProgress: Function to report progress to MCP server (optional)
+ *   - mcpLog: MCP logger object (optional)
+ *   - session: Session object from MCP server (optional)
+ * @returns {Array} Generated subtasks
+ */
+async function generateSubtasks(
+	task,
+	numSubtasks,
+	nextSubtaskId,
+	additionalContext = '',
+	{ reportProgress, mcpLog, silentMode, session } = {}
+) {
+	try {
+		// Check both global silentMode and the passed parameter
+		const isSilent =
+		silentMode || (typeof silentMode === 'undefined' && isSilentMode());
+
+		// Use mcpLog if provided, otherwise use regular log if not silent
+		const logFn = mcpLog
+			? (level, ...args) => mcpLog[level](...args)
+			: (level, ...args) => !isSilent && log(level, ...args);
+
+		logFn(
+			'info',
+			`Generating ${numSubtasks} subtasks for task ${task.id}: ${task.title}`
+		);
+
+		// Only create loading indicators if not in silent mode
+		let loadingIndicator = null;
+		if (!isSilent) {
+			loadingIndicator = startLoadingIndicator(
+				`Generating subtasks for task ${task.id}...`
+			);
+		}
+
+		let streamingInterval = null;
+		let responseText = '';
+
+		const systemPrompt = `You are an AI assistant helping with task breakdown for software development. 
+You need to break down a high-level task into ${numSubtasks} specific subtasks that can be implemented one by one.
+
+Subtasks should:
+1. Be specific and actionable implementation steps
+2. Follow a logical sequence
+3. Each handle a distinct part of the parent task
+4. Include clear guidance on implementation approach
+5. Have appropriate dependency chains between subtasks
+6. Collectively cover all aspects of the parent task
+
+For each subtask, provide:
+- A clear, specific title
+- Detailed description of the task
+- Dependencies on previous subtasks
+- Testing approach
+
+Each subtask should be implementable in a focused coding session.`;
+
+		const contextPrompt = additionalContext
+			? `\n\nAdditional context to consider: ${additionalContext}`
+			: '';
+
+		const userPrompt = `Please break down this task into ${numSubtasks} specific, actionable subtasks:
+
+Task ID: ${task.id}
+Title: ${task.title}
+Description: ${task.description}
+Current details: ${task.details || 'None provided'}
+${contextPrompt}
+
+Return exactly ${numSubtasks} subtasks with the following JSON structure:
+[
+    {
+      "id": 1,
+      "title": "Example Task Title",
+      "description": "Detailed description of the task (if needed you can use markdown formatting, e.g. headings, lists, etc.)",
+	  "acceptanceCriteria": "Detailed acceptance criteria for the task following typical Gherkin syntax",
+      "status": "pending",
+      "dependencies": [0],
+      "priority": "high",
+      "details": "Detailed implementation guidance",
+      "testStrategy": "A Test Driven Development (TDD) approach for validating this task. Always specify TDD tests for each task if possible."
+    },
+    // ... more tasks ...
+],
+
+Note on dependencies: Subtasks can depend on other subtasks with lower IDs. Use an empty array if there are no dependencies.`;
+
+		try {
+			// Update loading indicator to show streaming progress
+			// Only create if not in silent mode
+			if (!isSilent) {
+				let dotCount = 0;
+				const readline = await import('readline');
+				streamingInterval = setInterval(() => {
+				readline.cursorTo(process.stdout, 0);
+				process.stdout.write(
+					`Generating subtasks for task ${task.id}${'.'.repeat(dotCount)}`
+				);
+					dotCount = (dotCount + 1) % 4;
+				}, 500);
+			}
+
+			// TODO: MOVE THIS TO THE STREAM REQUEST FUNCTION (DRY)
+
+			// Use streaming API call
+			const stream = await anthropic.messages.create({
+				model: session?.env?.ANTHROPIC_MODEL,
+				max_tokens: session?.env?.MAX_TOKENS,
+				temperature: session?.env?.TEMPERATURE,
+				system: systemPrompt,
+				messages: [
+					{
+						role: 'user',
+						content: userPrompt
+					}
+				],
+				stream: true
+			});
+
+			// Process the stream
+			for await (const chunk of stream) {
+				if (chunk.type === 'content_block_delta' && chunk.delta.text) {
+					responseText += chunk.delta.text;
+				}
+				if (reportProgress) {
+					await reportProgress({
+						progress: (responseText.length / session?.env?.MAX_TOKENS) * 100
+					});
+				}
+				if (mcpLog) {
+					mcpLog.info(
+						`Progress: ${(responseText.length / session?.env?.MAX_TOKENS) * 100}%`
+					);
+				}
+			}
+
+			if (streamingInterval) clearInterval(streamingInterval);
+			if (loadingIndicator) stopLoadingIndicator(loadingIndicator);
+
+			logFn('info', `Completed generating subtasks for task ${task.id}`);
+
+			return parseSubtasksFromText(
+				responseText,
+				nextSubtaskId,
+				numSubtasks,
+				task.id
+			);
+		} catch (error) {
+			if (streamingInterval) clearInterval(streamingInterval);
+			if (loadingIndicator) stopLoadingIndicator(loadingIndicator);
+			throw error;
+		}
+	} catch (error) {
+		logFn('error', `Error generating subtasks: ${error.message}`);
+		throw error;
 	}
 }
