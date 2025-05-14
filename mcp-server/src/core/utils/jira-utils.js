@@ -641,7 +641,14 @@ export async function findNextJiraTask(parentKey, log) {
  * @returns {Promise} - Result object with success status and updated issue details
  */
 export async function updateJiraIssues(issueIds, prompt, useResearch = false, options = {}) {
-    const { session, log = console, projectRoot } = options;
+    const { session, projectRoot } = options;
+
+	// Get logger from options or use console.log
+    const log = options.mcpLog || {
+        info: (message) => console.log(message),
+        warn: (message) => console.warn(message),
+        error: (message) => console.error(message)
+    };
     
     try {
 		// Check if Jira is enabled using the JiraClient
@@ -738,10 +745,10 @@ Guidelines:
 9. Instead, add a new subtask that clearly indicates what needs to be changed or replaced
 10. Use the existence of completed subtasks as an opportunity to make new subtasks more specific and targeted
 
-The changes described in the prompt should be applied to ALL tasks in the list.`;
+The changes described in the prompt should be applied to ALL tasks in the list. Do not wrap your response in \`\`\`json\`\`\``;
 
 		const role = useResearch ? 'research' : 'main';
-		const userPrompt = `Here are the tasks to update:\n${tasks}\n\nPlease update these tasks based on the following new context:\n${prompt}\n\nIMPORTANT: In the tasks JSON above, any subtasks with "status": "done" or "status": "completed" should be preserved exactly as is. Build your changes around these completed items.\n\nReturn only the updated tasks as a valid JSON array.`;
+		const userPrompt = `Here are the tasks to update:\n${JSON.stringify(tasks)}\n\nPlease update these tasks based on the following new context:\n${prompt}\n\nIMPORTANT: In the tasks JSON above, any subtasks with "status": "done" or "status": "completed" should be preserved exactly as is. Build your changes around these completed items.\n\nReturn only the updated tasks as a valid JSON array.`;
 
 		let updates = await generateTextService({
 			prompt: userPrompt,
@@ -751,8 +758,19 @@ The changes described in the prompt should be applied to ALL tasks in the list.`
 			projectRoot
 		});
         
+        // Check if updates is a string and try to parse it as JSON
+        if (typeof updates === 'string') {
+            try {
+                updates = JSON.parse(updates);
+                log.info('Successfully parsed string response into JSON');
+            } catch (parseError) {
+                log.error(`Failed to parse updates string as JSON: ${parseError.message}`);
+                throw new Error('Failed to parse LLM response into valid JSON');
+            }
+        }
+        
         if (!updates || !Array.isArray(updates)) {
-            throw new Error('Failed to generate valid updates');
+            throw new Error('Failed to generate valid updates, updates: ' + updates);
         }
         
         log.info(`Successfully parsed updates for ${updates.length} issue(s)`);
@@ -991,7 +1009,7 @@ The changes described in the prompt should be applied to ALL tasks in the list.`
 export async function expandJiraTask(taskId, numSubtasks, useResearch = false, additionalContext = '', options = {}) {
 	// Destructure options object
 	const { reportProgress, mcpLog, session, force = false } = options;
-	
+
 	// Determine output format based on mcpLog presence (simplification)
 	const outputFormat = mcpLog ? 'json' : 'text';
 
@@ -1051,18 +1069,7 @@ export async function expandJiraTask(taskId, numSubtasks, useResearch = false, a
 			debug: (message) => report(message),
 			success: (message) => report(message) // Map success to info
 		};
-		
-		// Set up AI client with options to suppress UI elements
-		const aiOptions = {
-			mcpLog: logWrapper,
-			session: session,
-			outputFormat: 'json',
-			noSpinner: true,
-			silent: true,
-			useFullDescription: true, // Add flag to use full description,
-			silentMode: isSilentMode()
-		};
-		
+
 		report(`Generating ${subtasksToGenerate} subtasks for Jira task ${taskId}`);
 		
 		// Generate subtasks with the AI service
@@ -1070,7 +1077,13 @@ export async function expandJiraTask(taskId, numSubtasks, useResearch = false, a
 			jiraTicket.toTaskMasterFormat(),
 			subtasksToGenerate,
 			useResearch,
-			aiOptions
+			additionalContext,
+			{
+				reportProgress,
+				mcpLog: logWrapper,
+				session,
+				silentMode: isSilentMode()
+			}
 		);
 		
 		if (!generatedSubtasks || !Array.isArray(generatedSubtasks)) {
@@ -1641,8 +1654,7 @@ export async function analyzeJiraTaskComplexity(parentKey, threshold = 5, useRes
  * Generate subtasks for a task
  * @param {Object} task - Task to generate subtasks for
  * @param {number} numSubtasks - Number of subtasks to generate
- * @param {number} nextSubtaskId - Next subtask ID
- * @param {string} additionalContext - Additional context
+ * @param {boolean} useResearch - Whether to use research for generating subtasks
  * @param {Object} options - Options object containing:
  *   - reportProgress: Function to report progress to MCP server (optional)
  *   - mcpLog: MCP logger object (optional)
@@ -1652,7 +1664,7 @@ export async function analyzeJiraTaskComplexity(parentKey, threshold = 5, useRes
 async function generateSubtasks(
 	task,
 	numSubtasks,
-	nextSubtaskId,
+	useResearch = false,
 	additionalContext = '',
 	{ reportProgress, mcpLog, silentMode, session } = {}
 ) {
@@ -1746,13 +1758,20 @@ Note on dependencies: Subtasks can depend on other subtasks with lower IDs. Use 
 				}, 500);
 			}
 
-			// TODO: MOVE THIS TO THE STREAM REQUEST FUNCTION (DRY)
+			// Configure Anthropic client
+			const anthropic = new Anthropic({
+				apiKey: process.env.ANTHROPIC_API_KEY,
+				// Add beta header for 128k token output
+				defaultHeaders: {
+					'anthropic-beta': 'output-128k-2025-02-19'
+				}
+			});
 
 			// Use streaming API call
 			const stream = await anthropic.messages.create({
-				model: session?.env?.ANTHROPIC_MODEL,
-				max_tokens: session?.env?.MAX_TOKENS,
-				temperature: session?.env?.TEMPERATURE,
+				model: "claude-3-7-sonnet-latest",
+				max_tokens: session?.env?.MAX_TOKENS || 15000,
+				temperature: session?.env?.TEMPERATURE || 0.4,
 				system: systemPrompt,
 				messages: [
 					{
@@ -1773,11 +1792,6 @@ Note on dependencies: Subtasks can depend on other subtasks with lower IDs. Use 
 						progress: (responseText.length / session?.env?.MAX_TOKENS) * 100
 					});
 				}
-				if (mcpLog) {
-					mcpLog.info(
-						`Progress: ${(responseText.length / session?.env?.MAX_TOKENS) * 100}%`
-					);
-				}
 			}
 
 			if (streamingInterval) clearInterval(streamingInterval);
@@ -1787,9 +1801,9 @@ Note on dependencies: Subtasks can depend on other subtasks with lower IDs. Use 
 
 			return parseSubtasksFromText(
 				responseText,
-				nextSubtaskId,
+				1,
 				numSubtasks,
-				task.id
+				task.id,
 			);
 		} catch (error) {
 			if (streamingInterval) clearInterval(streamingInterval);
@@ -1797,7 +1811,95 @@ Note on dependencies: Subtasks can depend on other subtasks with lower IDs. Use 
 			throw error;
 		}
 	} catch (error) {
-		logFn('error', `Error generating subtasks: ${error.message}`);
 		throw error;
 	}
+}
+
+/**
+ * Parse subtasks from Claude's response text
+ * @param {string} text - Response text
+ * @param {number} startId - Starting subtask ID
+ * @param {number} expectedCount - Expected number of subtasks
+ * @param {number} parentTaskId - Parent task ID
+ * @returns {Array} Parsed subtasks
+ * @throws {Error} If parsing fails or JSON is invalid
+ */
+function parseSubtasksFromText(text, startId, expectedCount, parentTaskId) {
+	// Set default values for optional parameters
+	startId = startId || 1;
+	expectedCount = expectedCount || 2; // Default to 2 subtasks if not specified
+
+	// Handle empty text case
+	if (!text || text.trim() === '') {
+		throw new Error('Empty text provided, cannot parse subtasks');
+	}
+
+	// Locate JSON array in the text
+	const jsonStartIndex = text.indexOf('[');
+	const jsonEndIndex = text.lastIndexOf(']');
+
+	// If no valid JSON array found, throw error
+	if (
+		jsonStartIndex === -1 ||
+		jsonEndIndex === -1 ||
+		jsonEndIndex < jsonStartIndex
+	) {
+		throw new Error('Could not locate valid JSON array in the response');
+	}
+
+	// Extract and parse the JSON
+	const jsonText = text.substring(jsonStartIndex, jsonEndIndex + 1);
+	let subtasks;
+
+	try {
+		subtasks = JSON.parse(jsonText);
+	} catch (parseError) {
+		throw new Error(`Failed to parse JSON: ${parseError.message}`);
+	}
+
+	// Validate array
+	if (!Array.isArray(subtasks)) {
+		throw new Error('Parsed content is not an array');
+	}
+
+	// Log warning if count doesn't match expected
+	if (expectedCount && subtasks.length !== expectedCount) {
+		log(
+			'warn',
+			`Expected ${expectedCount} subtasks, but parsed ${subtasks.length}`
+		);
+	}
+
+	// Normalize subtask IDs if they don't match
+	subtasks = subtasks.map((subtask, index) => {
+		// Assign the correct ID if it doesn't match
+		if (!subtask.id || subtask.id !== startId + index) {
+			log(
+				'warn',
+				`Correcting subtask ID from ${subtask.id || 'undefined'} to ${startId + index}`
+			);
+			subtask.id = startId + index;
+		}
+
+		// Convert dependencies to numbers if they are strings
+		if (subtask.dependencies && Array.isArray(subtask.dependencies)) {
+			subtask.dependencies = subtask.dependencies.map((dep) => {
+				return typeof dep === 'string' ? parseInt(dep, 10) : dep;
+			});
+		} else {
+			subtask.dependencies = [];
+		}
+
+		// Ensure status is 'pending'
+		subtask.status = 'pending';
+
+		// Add parentTaskId if provided
+		if (parentTaskId) {
+			subtask.parentTaskId = parentTaskId;
+		}
+
+		return subtask;
+	});
+
+	return subtasks;
 }
