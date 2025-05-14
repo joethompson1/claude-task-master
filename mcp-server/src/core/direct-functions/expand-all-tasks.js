@@ -8,7 +8,6 @@ import {
 	disableSilentMode
 } from '../../../../scripts/modules/utils.js';
 import { createLogWrapper } from '../../tools/utils.js';
-import { getAnthropicClientForMCP } from '../utils/ai-client-utils.js';
 import { JiraClient } from '../utils/jira-client.js';
 import { fetchTasksFromJira, expandJiraTask } from '../utils/jira-utils.js';
 
@@ -137,27 +136,6 @@ export async function expandAllJiraTasksDirect(args, log, context = {}) {
 			log.info(
 				`Expanding all Jira tasks with ${numSubtasks || 'default'} subtasks each...`
 			);
-
-			if (useResearch) {
-				log.info('Using Perplexity AI for research-backed subtask generation');
-
-				// Initialize AI client for research-backed expansion
-				try {
-					await getAnthropicClientForMCP(session, log);
-				} catch (error) {
-					// Ensure silent mode is disabled before returning error
-					disableSilentMode();
-
-					log.error(`Failed to initialize AI client: ${error.message}`);
-					return {
-						success: false,
-						error: {
-							code: 'AI_CLIENT_ERROR',
-							message: `Cannot initialize AI client: ${error.message}`
-						}
-					};
-				}
-			}
 
 			if (additionalContext) {
 				log.info(`Additional context: "${additionalContext}"`);

@@ -236,27 +236,6 @@ export async function updateJiraSubtaskByIdDirect(args, log, context = {}) {
 			`Updating Jira subtask with ID ${subtaskId} with prompt "${prompt}" and research: ${useResearch}`
 		);
 
-		// Initialize the appropriate AI client based on research flag
-		try {
-			if (useResearch) {
-				// Initialize Perplexity client
-				await getPerplexityClientForMCP(session);
-			} else {
-				// Initialize Anthropic client
-				await getAnthropicClientForMCP(session);
-			}
-		} catch (error) {
-			log.error(`AI client initialization error: ${error.message}`);
-			return {
-				success: false,
-				error: {
-					code: 'AI_CLIENT_ERROR',
-					message: error.message || 'Failed to initialize AI client'
-				},
-				fromCache: false
-			};
-		}
-
 		try {
 			// Enable silent mode to prevent console logs from interfering with JSON response
 			enableSilentMode();

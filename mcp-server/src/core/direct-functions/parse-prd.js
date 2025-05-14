@@ -201,22 +201,6 @@ export async function parsePRDWithJiraDirect(args, log, context = {}) {
 	try {
 		log.info(`Parsing PRD document for Jira with args: ${JSON.stringify(args)}`);
 
-		// Initialize AI client for PRD parsing
-		let aiClient;
-		try {
-			aiClient = getAnthropicClientForMCP(session, log);
-		} catch (error) {
-			log.error(`Failed to initialize AI client: ${error.message}`);
-			return {
-				success: false,
-				error: {
-					code: 'AI_CLIENT_ERROR',
-					message: `Cannot initialize AI client: ${error.message}`
-				},
-				fromCache: false
-			};
-		}
-
 		// Check if Jira is enabled using the JiraClient
 		const jiraClient = new JiraClient();
 

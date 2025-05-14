@@ -246,28 +246,6 @@ export async function updateJiraTaskByIdDirect(args, log, context = {}) {
 		// Get research flag
 		const useResearch = research === true;
 
-		// Initialize appropriate AI client based on research flag
-		let aiClient;
-		try {
-			if (useResearch) {
-				log.info('Using Perplexity AI for research-backed task update');
-				aiClient = await getPerplexityClientForMCP(session, log);
-			} else {
-				log.info('Using Claude AI for task update');
-				aiClient = getAnthropicClientForMCP(session, log);
-			}
-		} catch (error) {
-			log.error(`Failed to initialize AI client: ${error.message}`);
-			return {
-				success: false,
-				error: {
-					code: 'AI_CLIENT_ERROR',
-					message: `Cannot initialize AI client: ${error.message}`
-				},
-				fromCache: false
-			};
-		}
-
 		log.info(
 			`Updating task with ID ${taskId} with prompt "${prompt}" and research: ${useResearch}`
 		);

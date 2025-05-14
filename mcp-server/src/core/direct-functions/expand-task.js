@@ -14,9 +14,6 @@ import {
 import path from 'path';
 import fs from 'fs';
 import { createLogWrapper } from '../../tools/utils.js';
-import {
-	getAnthropicClientForMCP,
-} from '../utils/ai-client-utils.js';
 import { 
 	fetchJiraTaskDetails, 
 	expandJiraTask, 
@@ -307,25 +304,6 @@ export async function expandJiraTaskDirect(args, log, context = {}) {
 	const numSubtasks = num ? parseInt(num, 10) : undefined;
 	const useResearch = research === true;
 	const additionalContext = prompt || '';
-	const forceFlag = force === true;
-
-	// Initialize AI client if needed
-	try {
-		if (useResearch) {
-			log.info('Verifying AI client for research-backed expansion');
-			await getAnthropicClientForMCP(session, log);
-		}
-	} catch (error) {
-		log.error(`Failed to initialize AI client: ${error.message}`);
-		return {
-			success: false,
-			error: {
-				code: 'AI_CLIENT_ERROR',
-				message: `Cannot initialize AI client: ${error.message}`
-			},
-			fromCache: false
-		};
-	}
 
 	try {
 		log.info(

@@ -1026,10 +1026,6 @@ export async function expandJiraTask(taskId, numSubtasks, useResearch = false, a
 		const defaultSubtasksCount = parseInt(process.env.DEFAULT_SUBTASKS || '3', 10);
 		const subtasksToGenerate = numSubtasks ? parseInt(numSubtasks, 10) : defaultSubtasksCount;
 		
-		// Import AI services
-		const { generateSubtasks } = await import('../../../../scripts/modules/ai-services.js');
-		const { getAnthropicClientForMCP } = await import('./ai-client-utils.js');
-		
 		// Create a JiraTicket instance from the task data
 		const jiraTicket = JiraTicket.fromTaskMaster(task);
 		
@@ -1044,7 +1040,6 @@ export async function expandJiraTask(taskId, numSubtasks, useResearch = false, a
 		
 		// Set up AI client with options to suppress UI elements
 		const aiOptions = {
-			anthropicClient: await getAnthropicClientForMCP(session, mcpLog),
 			mcpLog: logWrapper,
 			session: session,
 			outputFormat: 'json',
