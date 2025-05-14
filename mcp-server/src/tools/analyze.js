@@ -11,7 +11,7 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { analyzeTaskComplexityDirect } from '../core/task-master-core.js'; // Assuming core functions are exported via task-master-core.js
+import { analyzeTaskComplexityDirect, analyzeJiraComplexityDirect } from '../core/task-master-core.js'; // Assuming core functions are exported via task-master-core.js
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 

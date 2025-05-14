@@ -5,7 +5,8 @@
 import { expandAllTasks } from '../../../../scripts/modules/task-manager.js';
 import {
 	enableSilentMode,
-	disableSilentMode
+	disableSilentMode,
+	isSilentMode
 } from '../../../../scripts/modules/utils.js';
 import { createLogWrapper } from '../../tools/utils.js';
 import { JiraClient } from '../utils/jira-client.js';

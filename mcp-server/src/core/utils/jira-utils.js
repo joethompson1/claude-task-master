@@ -3,11 +3,12 @@
  * Utility functions for interacting with Jira API
  */
 import { generateTextService } from '../../../../scripts/modules/ai-services-unified.js';
-import { isSilentMode } from '../../../../scripts/modules/utils.js';
+import { isSilentMode, log } from '../../../../scripts/modules/utils.js';
+import { getDebugFlag } from '../../../../scripts/modules/config-manager.js';
 import { startLoadingIndicator, stopLoadingIndicator } from '../../../../scripts/modules/ui.js';
-import { parseSubtasksFromText } from '../../../../scripts/modules/task-manager/expand-task.js';
 import { JiraTicket } from './jira-ticket.js';
 import { JiraClient } from './jira-client.js';
+import { Anthropic } from '@anthropic-ai/sdk';
 
 /**
  * Fetch a single Jira task details by its key
