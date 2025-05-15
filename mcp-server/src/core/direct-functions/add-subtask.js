@@ -166,8 +166,6 @@ export async function addSubtaskDirect(args, log) {
 	}
 }
 
-
-
 /**
  * Create a Jira subtask under a specified parent issue
  * @param {Object} args - Function arguments
@@ -185,42 +183,44 @@ export async function addSubtaskDirect(args, log) {
  * @returns {Promise<Object>} - Result object with success status and data/error
  */
 export async function addJiraSubtaskDirect(args, log, context = {}) {
-    try {
-        // Extract parameters from args
-        const { 
-            parentKey, 
-            title, 
-            description,
+	try {
+		// Extract parameters from args
+		const {
+			parentKey,
+			title,
+			description,
 			details,
 			acceptanceCriteria,
 			testStrategy,
-            priority, 
-            assignee, 
-            labels
-        } = args;
-        
-        // Validate required parameters
-        if (!parentKey) {
-            return {
-                success: false,
-                error: {
-                    code: 'MISSING_PARAMETER',
-                    message: 'Parent issue key (parentKey) is required'
-                }
-            };
-        }
-        
-        if (!title) {
-            return {
-                success: false,
-                error: {
-                    code: 'MISSING_PARAMETER',
-                    message: 'Subtask title/summary is required'
-                }
-            };
-        }
-        
-        log.info(`Creating Jira subtask under parent ${parentKey} with title "${title}"`);
+			priority,
+			assignee,
+			labels
+		} = args;
+
+		// Validate required parameters
+		if (!parentKey) {
+			return {
+				success: false,
+				error: {
+					code: 'MISSING_PARAMETER',
+					message: 'Parent issue key (parentKey) is required'
+				}
+			};
+		}
+
+		if (!title) {
+			return {
+				success: false,
+				error: {
+					code: 'MISSING_PARAMETER',
+					message: 'Subtask title/summary is required'
+				}
+			};
+		}
+
+		log.info(
+			`Creating Jira subtask under parent ${parentKey} with title "${title}"`
+		);
 
 		const jiraTicket = new JiraTicket({
 			title: title,
@@ -234,29 +234,26 @@ export async function addJiraSubtaskDirect(args, log, context = {}) {
 			parentKey: parentKey,
 			issueType: 'Subtask'
 		});
-        
-        // Call the refactored function with 'Subtask' as the issue type
-        const result = await createJiraIssue(
-            jiraTicket,
-            log
-        );
-        
-        // Return the result directly
-        return result;
-    } catch (error) {
-        // Log the error
-        log.error(`Error in addJiraSubtaskDirect: ${error.message}`);
-        
-        // Return structured error response
-        return {
-            success: false,
-            error: {
-                code: 'DIRECT_FUNCTION_ERROR',
-                message: error.message,
-                details: error.stack,
-                // Preserve any displayMessage from the error object
-                displayMessage: error.error?.displayMessage || error.message
-            }
-        };
-    }
+
+		// Call the refactored function with 'Subtask' as the issue type
+		const result = await createJiraIssue(jiraTicket, log);
+
+		// Return the result directly
+		return result;
+	} catch (error) {
+		// Log the error
+		log.error(`Error in addJiraSubtaskDirect: ${error.message}`);
+
+		// Return structured error response
+		return {
+			success: false,
+			error: {
+				code: 'DIRECT_FUNCTION_ERROR',
+				message: error.message,
+				details: error.stack,
+				// Preserve any displayMessage from the error object
+				displayMessage: error.error?.displayMessage || error.message
+			}
+		};
+	}
 }

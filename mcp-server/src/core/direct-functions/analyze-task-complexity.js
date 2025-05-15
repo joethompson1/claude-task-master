@@ -217,7 +217,9 @@ export async function analyzeJiraComplexityDirect(args, log, context = {}) {
 	const { parentKey, outputPath, model, threshold, research } = args;
 
 	try {
-		log.info(`Analyzing Jira task complexity with args: ${JSON.stringify(args)}`);
+		log.info(
+			`Analyzing Jira task complexity with args: ${JSON.stringify(args)}`
+		);
 
 		// Check if outputPath was provided
 		if (!outputPath) {
@@ -229,7 +231,9 @@ export async function analyzeJiraComplexityDirect(args, log, context = {}) {
 		}
 
 		// Import analyzeJiraTaskComplexity from jira-utils.js
-		const { analyzeJiraTaskComplexity } = await import('../utils/jira-utils.js');
+		const { analyzeJiraTaskComplexity } = await import(
+			'../utils/jira-utils.js'
+		);
 
 		// Create options object for analyzeJiraTaskComplexity
 		const options = {
@@ -237,9 +241,12 @@ export async function analyzeJiraComplexityDirect(args, log, context = {}) {
 		};
 
 		// Convert threshold to a number if it's a string
-		const thresholdValue = typeof threshold === 'string' ? parseFloat(threshold) : threshold;
+		const thresholdValue =
+			typeof threshold === 'string' ? parseFloat(threshold) : threshold;
 
-		log.info(`Analyzing Jira task complexity from: ${parentKey || 'all tasks'}`);
+		log.info(
+			`Analyzing Jira task complexity from: ${parentKey || 'all tasks'}`
+		);
 		log.info(`Output report will be saved to: ${outputPath}`);
 
 		if (research) {
@@ -264,17 +271,16 @@ export async function analyzeJiraComplexityDirect(args, log, context = {}) {
 		try {
 			// Call the Jira utility function
 			const result = await analyzeJiraTaskComplexity(
-				parentKey, 
-				thresholdValue || 5, 
-				research === true, 
-				outputPath, 
+				parentKey,
+				thresholdValue || 5,
+				research === true,
+				outputPath,
 				options,
 				logWrapper,
 				{ session }
 			);
 
 			return result;
-
 		} catch (error) {
 			log.error(`Error in analyzeJiraTaskComplexity: ${error.message}`);
 			return {

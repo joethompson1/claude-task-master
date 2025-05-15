@@ -121,7 +121,7 @@ export async function addJiraDependencyDirect(args, log, context = {}) {
 	// Destructure expected args and context
 	const { id, dependsOn } = args;
 	const { session } = context;
-	
+
 	try {
 		log.info(`Adding Jira dependency with args: ${JSON.stringify(args)}`);
 
@@ -168,7 +168,7 @@ export async function addJiraDependencyDirect(args, log, context = {}) {
 			// The dependent issue (id) "is blocked by" the dependency issue (dependsOn)
 			const linkPayload = {
 				type: {
-					name: "Blocks" // Common link type - the dependency blocks the dependent issue
+					name: 'Blocks' // Common link type - the dependency blocks the dependent issue
 				},
 				inwardIssue: {
 					key: dependsOn
@@ -177,7 +177,7 @@ export async function addJiraDependencyDirect(args, log, context = {}) {
 					key: id
 				}
 			};
-			
+
 			const client = jiraClient.getClient();
 			await client.post('/rest/api/3/issueLink', linkPayload);
 

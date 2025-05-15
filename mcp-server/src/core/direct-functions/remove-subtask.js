@@ -153,9 +153,7 @@ export async function removeJiraSubtaskDirect(args, log) {
 		// Convert convertToTask to a boolean
 		const convertToTask = convert === true;
 
-		log.info(
-			`Removing Jira subtask ${id} (convertToTask: ${convertToTask})`
-		);
+		log.info(`Removing Jira subtask ${id} (convertToTask: ${convertToTask})`);
 
 		// Call the Jira utility function to remove the subtask
 		const result = await removeJiraSubtask(id, convertToTask, log);

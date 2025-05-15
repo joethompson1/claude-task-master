@@ -119,7 +119,7 @@ export async function removeJiraDependencyDirect(args, log, context = {}) {
 	// Destructure expected args and context
 	const { id, dependsOn } = args;
 	const { session } = context;
-	
+
 	try {
 		log.info(`Removing Jira dependency with args: ${JSON.stringify(args)}`);
 
@@ -156,7 +156,9 @@ export async function removeJiraDependencyDirect(args, log, context = {}) {
 			};
 		}
 
-		log.info(`Removing dependency: Jira issue ${id} will no longer depend on ${dependsOn}`);
+		log.info(
+			`Removing dependency: Jira issue ${id} will no longer depend on ${dependsOn}`
+		);
 
 		// Enable silent mode to prevent console logs from interfering with JSON response
 		enableSilentMode();
@@ -164,30 +166,30 @@ export async function removeJiraDependencyDirect(args, log, context = {}) {
 		try {
 			// First, need to find the issue link ID between the two issues
 			const client = jiraClient.getClient();
-			
+
 			// Get the issue with its links
 			const issueResponse = await client.get(`/rest/api/3/issue/${id}`, {
 				params: {
 					fields: 'issuelinks'
 				}
 			});
-			
+
 			// Find the specific link to remove
 			const issueLinks = issueResponse.data?.fields?.issuelinks || [];
 			let linkIdToRemove = null;
-			
+
 			// Check all links to find the one that matches our dependency
 			for (const link of issueLinks) {
 				// Check if this is our dependency (can be inward or outward link)
 				if (
-					(link.inwardIssue && link.inwardIssue.key === dependsOn) || 
+					(link.inwardIssue && link.inwardIssue.key === dependsOn) ||
 					(link.outwardIssue && link.outwardIssue.key === dependsOn)
 				) {
 					linkIdToRemove = link.id;
 					break;
 				}
 			}
-			
+
 			// If no matching link was found
 			if (!linkIdToRemove) {
 				disableSilentMode();
@@ -199,7 +201,7 @@ export async function removeJiraDependencyDirect(args, log, context = {}) {
 					}
 				};
 			}
-			
+
 			// Delete the link
 			await client.delete(`/rest/api/3/issueLink/${linkIdToRemove}`);
 

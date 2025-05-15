@@ -151,8 +151,7 @@ export async function clearJiraSubtasksDirect(args, log, context = {}) {
 				success: false,
 				error: {
 					code: 'INPUT_VALIDATION_ERROR',
-					message:
-						'Either parentKey or all parameter must be provided'
+					message: 'Either parentKey or all parameter must be provided'
 				}
 			};
 		}
@@ -200,7 +199,7 @@ export async function clearJiraSubtasksDirect(args, log, context = {}) {
 			}
 
 			parentIssues = searchResult.data;
-			
+
 			if (parentIssues.length === 0) {
 				disableSilentMode();
 				return {
@@ -220,7 +219,9 @@ export async function clearJiraSubtasksDirect(args, log, context = {}) {
 			for (const parentIssue of parentIssues) {
 				// Get subtasks for this parent
 				const subtasksJql = `project = "${jiraClient.config.project}" AND parent = "${parentIssue.jiraKey}" AND issuetype = "Subtask" ORDER BY created ASC`;
-				log.info(`Fetching subtasks for parent ${parentIssue.jiraKey} with JQL: ${subtasksJql}`);
+				log.info(
+					`Fetching subtasks for parent ${parentIssue.jiraKey} with JQL: ${subtasksJql}`
+				);
 
 				const subtasksResult = await jiraClient.searchIssues(subtasksJql, {
 					maxResults: 100,
@@ -229,7 +230,9 @@ export async function clearJiraSubtasksDirect(args, log, context = {}) {
 				});
 
 				if (!subtasksResult.success) {
-					log.warn(`Error fetching subtasks for ${parentIssue.jiraKey}: ${subtasksResult.error?.message}`);
+					log.warn(
+						`Error fetching subtasks for ${parentIssue.jiraKey}: ${subtasksResult.error?.message}`
+					);
 					failedResults.push({
 						parentKey: parentIssue.jiraKey,
 						error: subtasksResult.error
@@ -238,7 +241,7 @@ export async function clearJiraSubtasksDirect(args, log, context = {}) {
 				}
 
 				const subtasks = subtasksResult.data;
-				
+
 				if (subtasks.length === 0) {
 					log.info(`No subtasks found for parent ${parentIssue.jiraKey}`);
 					results.push({
@@ -253,11 +256,17 @@ export async function clearJiraSubtasksDirect(args, log, context = {}) {
 				// Remove each subtask
 				const removedSubtasks = [];
 				let subtasksRemovedCount = 0;
-				
+
 				for (const subtask of subtasks) {
-					log.info(`Removing subtask ${subtask.jiraKey} from parent ${parentIssue.jiraKey}`);
-					const removeResult = await removeJiraSubtask(subtask.jiraKey, false, log);
-					
+					log.info(
+						`Removing subtask ${subtask.jiraKey} from parent ${parentIssue.jiraKey}`
+					);
+					const removeResult = await removeJiraSubtask(
+						subtask.jiraKey,
+						false,
+						log
+					);
+
 					if (removeResult.success) {
 						removedSubtasks.push({
 							key: subtask.jiraKey,
@@ -267,7 +276,9 @@ export async function clearJiraSubtasksDirect(args, log, context = {}) {
 						subtasksRemovedCount++;
 						totalSubtasksRemoved++;
 					} else {
-						log.warn(`Failed to remove subtask ${subtask.jiraKey}: ${removeResult.error?.message}`);
+						log.warn(
+							`Failed to remove subtask ${subtask.jiraKey}: ${removeResult.error?.message}`
+						);
 						removedSubtasks.push({
 							key: subtask.jiraKey,
 							title: subtask.title,
@@ -302,7 +313,7 @@ export async function clearJiraSubtasksDirect(args, log, context = {}) {
 		} catch (error) {
 			// Handle Jira API errors
 			disableSilentMode();
-			
+
 			log.error(`Error clearing Jira subtasks: ${error.message}`);
 			return {
 				success: false,

@@ -499,9 +499,11 @@ function registerCommands(programInstance) {
 	// parse-prd command
 	programInstance
 		.command('parse-prd')
-		.description(() => JiraClient.isJiraEnabled() 
-			? 'Parse a PRD file and generate Jira issues' 
-			: 'Parse a PRD file and generate tasks')
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? 'Parse a PRD file and generate Jira issues'
+				: 'Parse a PRD file and generate tasks'
+		)
 		.argument('[file]', 'Path to the PRD file')
 		.option(
 			'-i, --input <file>',
@@ -516,21 +518,21 @@ function registerCommands(programInstance) {
 		)
 		.option(
 			'--jira-issue-type <type>',
-			() => JiraClient.isJiraEnabled() 
-				? 'Jira issue type (default: "Task", "Epic", "Story", "Bug", "Subtask")' 
-				: 'Jira issue type (only used when Jira is enabled)',
+			() =>
+				JiraClient.isJiraEnabled()
+					? 'Jira issue type (default: "Task", "Epic", "Story", "Bug", "Subtask")'
+					: 'Jira issue type (only used when Jira is enabled)',
 			'Task'
 		)
-		.option(
-			'--jira-parent-issue <key>',
-			() => JiraClient.isJiraEnabled() 
-				? 'Jira issue key of the parent issue/epic to link tasks to' 
+		.option('--jira-parent-issue <key>', () =>
+			JiraClient.isJiraEnabled()
+				? 'Jira issue key of the parent issue/epic to link tasks to'
 				: 'Jira parent issue key (only used when Jira is enabled)'
 		)
 		.action(async (file, options) => {
 			const isJiraEnabled = JiraClient.isJiraEnabled();
 			const numTasks = parseInt(options.numTasks, 10);
-			
+
 			if (isJiraEnabled) {
 				// Jira mode
 				// Use input option if file argument not provided
@@ -538,7 +540,7 @@ function registerCommands(programInstance) {
 				const defaultPrdPath = 'scripts/prd.txt';
 				const jiraIssueType = options.jiraIssueType || 'Task';
 				const jiraParentIssue = options.jiraParentIssue;
-				
+
 				// If no input file specified, check for default PRD location
 				if (!inputFile) {
 					console.log(
@@ -575,26 +577,30 @@ function registerCommands(programInstance) {
 					);
 					return;
 				}
-				
+
 				// Process the specified PRD file
 				if (!fs.existsSync(inputFile)) {
-					console.error(chalk.red(`Error: PRD file not found at path: ${inputFile}`));
+					console.error(
+						chalk.red(`Error: PRD file not found at path: ${inputFile}`)
+					);
 					process.exit(1);
 				}
-				
+
 				// Read the PRD content
 				const prdContent = fs.readFileSync(inputFile, 'utf8');
-				
+
 				console.log(chalk.blue(`Parsing PRD file: ${inputFile}`));
 				console.log(chalk.blue(`Generating ${numTasks} Jira issues...`));
 				console.log(chalk.blue(`Issue type: ${jiraIssueType}`));
 				if (jiraParentIssue) {
 					console.log(chalk.blue(`Parent issue: ${jiraParentIssue}`));
 				}
-				
+
 				// Import the parsePRDWithJiraDirect function dynamically
-				const { parsePRDWithJiraDirect } = await import('../../mcp-server/src/core/direct-functions/parse-prd.js');
-				
+				const { parsePRDWithJiraDirect } = await import(
+					'../../mcp-server/src/core/direct-functions/parse-prd.js'
+				);
+
 				try {
 					const result = await parsePRDWithJiraDirect(
 						{
@@ -603,23 +609,27 @@ function registerCommands(programInstance) {
 							jiraIssueType: jiraIssueType,
 							jiraParentIssue: jiraParentIssue
 						},
-						{ 
-							info: (msg) => console.log(chalk.blue(msg)), 
-							warn: (msg) => console.log(chalk.yellow(msg)), 
+						{
+							info: (msg) => console.log(chalk.blue(msg)),
+							warn: (msg) => console.log(chalk.yellow(msg)),
 							error: (msg) => console.error(chalk.red(msg))
 						},
 						{ session: process.env }
 					);
-					
+
 					if (result.success) {
 						console.log(chalk.green(result.data.message));
-						console.log(chalk.green(`Created ${result.data.issuesCreated} Jira issues.`));
+						console.log(
+							chalk.green(`Created ${result.data.issuesCreated} Jira issues.`)
+						);
 					} else {
 						console.error(chalk.red(`Error: ${result.error.message}`));
 						process.exit(1);
 					}
 				} catch (error) {
-					console.error(chalk.red(`Error parsing PRD for Jira: ${error.message}`));
+					console.error(
+						chalk.red(`Error parsing PRD for Jira: ${error.message}`)
+					);
 					process.exit(1);
 				}
 			} else {
@@ -741,10 +751,11 @@ function registerCommands(programInstance) {
 		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
 		.option(
-			'--from <id>', 
-			() => JiraClient.isJiraEnabled() 
-				? 'Jira issue key(s) to update (e.g., "PROJ-123" or "PROJ-123,PROJ-124")' 
-				: 'Task ID to start updating from (tasks with ID >= this value will be updated)',
+			'--from <id>',
+			() =>
+				JiraClient.isJiraEnabled()
+					? 'Jira issue key(s) to update (e.g., "PROJ-123" or "PROJ-123,PROJ-124")'
+					: 'Task ID to start updating from (tasks with ID >= this value will be updated)',
 			'1'
 		)
 		.option(
@@ -755,9 +766,8 @@ function registerCommands(programInstance) {
 			'-r, --research',
 			'Use Perplexity AI for research-backed task updates'
 		)
-		.option(
-			'--parent-key <key>',
-			() => JiraClient.isJiraEnabled()
+		.option('--parent-key <key>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Parent Jira issue key to filter tasks by'
 				: 'Parent Jira issue key (only used when Jira is enabled)'
 		)
@@ -772,9 +782,15 @@ function registerCommands(programInstance) {
 				process.argv.some((arg) => arg.startsWith('--id='))
 			) {
 				console.error(
-					chalk.red(`Error: The update command uses --from=<${isJiraEnabled ? 'key' : 'id'}>, not --id=<id>`)
+					chalk.red(
+						`Error: The update command uses --from=<${isJiraEnabled ? 'key' : 'id'}>, not --id=<id>`
+					)
 				);
-				console.log(chalk.yellow(`\nTo update multiple ${isJiraEnabled ? 'Jira issues' : 'tasks'}:`));
+				console.log(
+					chalk.yellow(
+						`\nTo update multiple ${isJiraEnabled ? 'Jira issues' : 'tasks'}:`
+					)
+				);
 				if (isJiraEnabled) {
 					console.log(
 						`  task-master update --from=PROJ-123 --prompt="Your prompt here"`
@@ -811,12 +827,13 @@ function registerCommands(programInstance) {
 				// Jira mode
 				const fromKey = options.from;
 				const parentKey = options.parentKey;
-				
+
 				// Determine if we're dealing with a single issue or multiple issues
-				const issueIds = fromKey && fromKey.includes(',') 
-					? fromKey.split(',').map(key => key.trim()) 
-					: fromKey;
-				
+				const issueIds =
+					fromKey && fromKey.includes(',')
+						? fromKey.split(',').map((key) => key.trim())
+						: fromKey;
+
 				// Validate Jira key format if provided
 				if (fromKey && fromKey !== '1') {
 					if (Array.isArray(issueIds)) {
@@ -844,17 +861,19 @@ function registerCommands(programInstance) {
 
 				console.log(
 					chalk.blue(
-						parentKey 
+						parentKey
 							? `Updating Jira issues from parent ${parentKey} with prompt: "${prompt}"`
-							: (Array.isArray(issueIds)
+							: Array.isArray(issueIds)
 								? `Updating ${issueIds.length} Jira issues with prompt: "${prompt}"`
-								: `Updating Jira issue ${fromKey} with prompt: "${prompt}"`)
+								: `Updating Jira issue ${fromKey} with prompt: "${prompt}"`
 					)
 				);
 
 				if (useResearch) {
 					console.log(
-						chalk.blue('Using Perplexity AI for research-backed Jira issue updates')
+						chalk.blue(
+							'Using Perplexity AI for research-backed Jira issue updates'
+						)
 					);
 				}
 
@@ -867,7 +886,9 @@ function registerCommands(programInstance) {
 						await updateJiraIssues(issueIds, prompt, useResearch, { log });
 					}
 				} catch (error) {
-					console.error(chalk.red(`Error updating Jira issues: ${error.message}`));
+					console.error(
+						chalk.red(`Error updating Jira issues: ${error.message}`)
+					);
 					if (getDebugFlag()) {
 						console.error(error);
 					}
@@ -911,10 +932,9 @@ function registerCommands(programInstance) {
 			'Update a single specific task by ID with new information (use --id parameter)'
 		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
-		.option(
-			'-i, --id <id>', 
-			() => JiraClient.isJiraEnabled() 
-				? 'Jira issue key to update (e.g., "PROJ-123")' 
+		.option('-i, --id <id>', () =>
+			JiraClient.isJiraEnabled()
+				? 'Jira issue key to update (e.g., "PROJ-123")'
 				: 'Task ID to update (required)'
 		)
 		.option(
@@ -960,26 +980,38 @@ function registerCommands(programInstance) {
 				if (isJiraEnabled) {
 					// Jira mode
 					const issueKey = options.id;
-					
+
 					// Validate Jira key format
 					if (!issueKey.includes('-')) {
 						console.error(
-							chalk.red(`Error: Invalid Jira issue key format. The key should be in the format "PROJ-123"`)
+							chalk.red(
+								`Error: Invalid Jira issue key format. The key should be in the format "PROJ-123"`
+							)
 						);
 						process.exit(1);
 					}
 
-					console.log(chalk.blue(`Updating Jira issue ${issueKey} with prompt: "${prompt}"`));
+					console.log(
+						chalk.blue(
+							`Updating Jira issue ${issueKey} with prompt: "${prompt}"`
+						)
+					);
 
 					if (useResearch) {
-						console.log(chalk.blue('Using Perplexity AI for research-backed Jira issue update'));
+						console.log(
+							chalk.blue(
+								'Using Perplexity AI for research-backed Jira issue update'
+							)
+						);
 					}
 
 					try {
 						// Call the updateJiraIssues function with the single issue ID
 						await updateJiraIssues(issueKey, prompt, useResearch, { log });
 					} catch (error) {
-						console.error(chalk.red(`Error updating Jira issue: ${error.message}`));
+						console.error(
+							chalk.red(`Error updating Jira issue: ${error.message}`)
+						);
 						if (getDebugFlag()) {
 							console.error(error);
 						}
@@ -1041,7 +1073,9 @@ function registerCommands(programInstance) {
 							);
 						} else {
 							console.log(
-								chalk.blue('Using Perplexity AI for research-backed task update')
+								chalk.blue(
+									'Using Perplexity AI for research-backed task update'
+								)
 							);
 						}
 					}
@@ -1098,15 +1132,13 @@ function registerCommands(programInstance) {
 			'Update a subtask by appending additional timestamped information'
 		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
-		.option(
-			'-i, --id <id>',
-			() => JiraClient.isJiraEnabled() 
-				? 'Jira issue key of the subtask to update (e.g., "PROJ-456")' 
+		.option('-i, --id <id>', () =>
+			JiraClient.isJiraEnabled()
+				? 'Jira issue key of the subtask to update (e.g., "PROJ-456")'
 				: 'Subtask ID to update in format "parentId.subtaskId" (required)'
 		)
-		.option(
-			'--parent-key <key>',
-			() => JiraClient.isJiraEnabled()
+		.option('--parent-key <key>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Parent Jira issue key (only needed for context or if issue key is ambiguous)'
 				: 'Parent Jira issue key (only used when Jira is enabled)'
 		)
@@ -1151,33 +1183,48 @@ function registerCommands(programInstance) {
 					// Jira mode
 					const subtaskKey = options.id;
 					const parentKey = options.parentKey;
-					
+
 					// Validate Jira key format
 					if (!subtaskKey.includes('-')) {
 						console.error(
-							chalk.red(`Error: Invalid Jira issue key format. The key should be in the format "PROJ-123"`)
+							chalk.red(
+								`Error: Invalid Jira issue key format. The key should be in the format "PROJ-123"`
+							)
 						);
 						process.exit(1);
 					}
 
-					console.log(chalk.blue(`Updating Jira subtask ${subtaskKey} with prompt: "${prompt}"`));
-					
+					console.log(
+						chalk.blue(
+							`Updating Jira subtask ${subtaskKey} with prompt: "${prompt}"`
+						)
+					);
+
 					if (parentKey) {
 						console.log(chalk.blue(`Parent issue: ${parentKey}`));
 					}
 
 					if (useResearch) {
-						console.log(chalk.blue('Using Perplexity AI for research-backed Jira subtask update'));
+						console.log(
+							chalk.blue(
+								'Using Perplexity AI for research-backed Jira subtask update'
+							)
+						);
 					}
 
 					try {
 						// For Jira, we need to use the updateJiraSubtask function from Jira utilities
 						// Check if this subtask already has a direct function wrapper in the code
-						// For now, we'll call updateJiraIssues with the single subtask ID, 
+						// For now, we'll call updateJiraIssues with the single subtask ID,
 						// and any parent key context if available
-						await updateJiraIssues(subtaskKey, prompt, useResearch, { log, parentKey });
+						await updateJiraIssues(subtaskKey, prompt, useResearch, {
+							log,
+							parentKey
+						});
 					} catch (error) {
-						console.error(chalk.red(`Error updating Jira subtask: ${error.message}`));
+						console.error(
+							chalk.red(`Error updating Jira subtask: ${error.message}`)
+						);
 						if (getDebugFlag()) {
 							console.error(error);
 						}
@@ -1312,18 +1359,18 @@ function registerCommands(programInstance) {
 	// set-status command
 	programInstance
 		.command('set-status')
-		.description(() => JiraClient.isJiraEnabled() 
-			? 'Set the status of a Jira issue' 
-			: 'Set the status of a task')
-		.option(
-			'-i, --id <id>',
-			() => JiraClient.isJiraEnabled()
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? 'Set the status of a Jira issue'
+				: 'Set the status of a task'
+		)
+		.option('-i, --id <id>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Jira issue key(s) to update (e.g., "PROJ-123" or "PROJ-123,PROJ-124")'
 				: 'Task ID (can be comma-separated for multiple tasks)'
 		)
-		.option(
-			'-s, --status <status>',
-			 () => JiraClient.isJiraEnabled()
+		.option('-s, --status <status>', () =>
+			JiraClient.isJiraEnabled()
 				? 'New status (e.g., "To Do", "In Progress", "Done")'
 				: 'New status (todo, in-progress, review, done)'
 		)
@@ -1340,20 +1387,22 @@ function registerCommands(programInstance) {
 
 			const isJiraEnabled = JiraClient.isJiraEnabled();
 			console.log(
-				chalk.blue(`Setting status of ${isJiraEnabled ? 'Jira issue' : 'task'}(s) ${taskId} to: ${status}`)
+				chalk.blue(
+					`Setting status of ${isJiraEnabled ? 'Jira issue' : 'task'}(s) ${taskId} to: ${status}`
+				)
 			);
 
 			try {
 				if (isJiraEnabled) {
 					// For Jira, pass appropriate parameters including log for consistent output
-					const result = await setJiraTaskStatus(taskId, status, { 
+					const result = await setJiraTaskStatus(taskId, status, {
 						log: {
 							info: (msg) => console.log(chalk.blue(msg)),
 							warn: (msg) => console.log(chalk.yellow(msg)),
 							error: (msg) => console.error(chalk.red(msg))
 						}
 					});
-					
+
 					if (!result.success) {
 						console.error(chalk.red(`Error: ${result.error.message}`));
 						process.exit(1);
@@ -1382,7 +1431,11 @@ function registerCommands(programInstance) {
 			const withSubtasks = options.withSubtasks || false;
 			const parentKey = options.parentKey;
 
-			console.log(chalk.blue(`Listing tasks from ${JiraClient.isJiraEnabled() ? 'Jira' : 'local file'}: ${JiraClient.isJiraEnabled() ? parentKey : tasksPath}`));
+			console.log(
+				chalk.blue(
+					`Listing tasks from ${JiraClient.isJiraEnabled() ? 'Jira' : 'local file'}: ${JiraClient.isJiraEnabled() ? parentKey : tasksPath}`
+				)
+			);
 			if (statusFilter) {
 				console.log(chalk.blue(`Filtering by status: ${statusFilter}`));
 			}
@@ -1396,13 +1449,14 @@ function registerCommands(programInstance) {
 	// expand command
 	programInstance
 		.command('expand')
-		.description(() => JiraClient.isJiraEnabled() 
-			? 'Break down Jira issues into detailed subtasks' 
-			: 'Break down tasks into detailed subtasks')
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? 'Break down Jira issues into detailed subtasks'
+				: 'Break down tasks into detailed subtasks'
+		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
-		.option(
-			'-i, --id <id>',
-			 () => JiraClient.isJiraEnabled()
+		.option('-i, --id <id>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Jira issue key to expand (e.g., "PROJ-123")'
 				: 'Task ID to expand'
 		)
@@ -1424,9 +1478,8 @@ function registerCommands(programInstance) {
 			'--force',
 			'Force regeneration of subtasks for tasks that already have them'
 		)
-		.option(
-			'--parent-key <key>',
-			() => JiraClient.isJiraEnabled()
+		.option('--parent-key <key>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Parent Jira issue key to filter tasks by (only used with --all)'
 				: 'Parent Jira issue key (only used when Jira is enabled with --all)'
 		)
@@ -1443,12 +1496,12 @@ function registerCommands(programInstance) {
 			try {
 				if (options.all) {
 					console.log(
-						chalk.blue(`Expanding all ${isJiraEnabled ? 'Jira issues' : 'tasks'} with ${numSubtasks} subtasks each...`)
+						chalk.blue(
+							`Expanding all ${isJiraEnabled ? 'Jira issues' : 'tasks'} with ${numSubtasks} subtasks each...`
+						)
 					);
 					if (isJiraEnabled && parentKey) {
-						console.log(
-							chalk.blue(`Filtering by parent issue: ${parentKey}`)
-						);
+						console.log(chalk.blue(`Filtering by parent issue: ${parentKey}`));
 					}
 					if (useResearch) {
 						console.log(
@@ -1462,13 +1515,17 @@ function registerCommands(programInstance) {
 						);
 					}
 					if (additionalContext) {
-						console.log(chalk.blue(`Additional context: "${additionalContext}"`));
+						console.log(
+							chalk.blue(`Additional context: "${additionalContext}"`)
+						);
 					}
-					
+
 					if (isJiraEnabled) {
 						// Import the expandAllJiraTasks function
-						const { expandAllJiraTasksDirect } = await import('../../mcp-server/src/core/direct-functions/expand-all-tasks.js');
-						
+						const { expandAllJiraTasksDirect } = await import(
+							'../../mcp-server/src/core/direct-functions/expand-all-tasks.js'
+						);
+
 						// Call the Jira implementation
 						const result = await expandAllJiraTasksDirect(
 							{
@@ -1485,13 +1542,17 @@ function registerCommands(programInstance) {
 							},
 							{}
 						);
-						
+
 						if (!result.success) {
 							console.error(chalk.red(`Error: ${result.error.message}`));
 							process.exit(1);
 						}
-						
-						console.log(chalk.green(`Successfully expanded ${result.data.tasksExpanded} Jira issues with ${result.data.subtasksCreated} total subtasks`));
+
+						console.log(
+							chalk.green(
+								`Successfully expanded ${result.data.tasksExpanded} Jira issues with ${result.data.subtasksCreated} total subtasks`
+							)
+						);
 					} else {
 						// Use the local implementation
 						await expandAllTasks(
@@ -1504,7 +1565,9 @@ function registerCommands(programInstance) {
 					}
 				} else if (idArg) {
 					console.log(
-						chalk.blue(`Expanding ${isJiraEnabled ? 'Jira issue' : 'task'} ${idArg} with ${numSubtasks} subtasks...`)
+						chalk.blue(
+							`Expanding ${isJiraEnabled ? 'Jira issue' : 'task'} ${idArg} with ${numSubtasks} subtasks...`
+						)
 					);
 					if (useResearch) {
 						console.log(
@@ -1518,13 +1581,17 @@ function registerCommands(programInstance) {
 						);
 					}
 					if (additionalContext) {
-						console.log(chalk.blue(`Additional context: "${additionalContext}"`));
+						console.log(
+							chalk.blue(`Additional context: "${additionalContext}"`)
+						);
 					}
-					
+
 					if (isJiraEnabled) {
 						// Import the expandJiraTask function
-						const { expandJiraTaskDirect } = await import('../../mcp-server/src/core/direct-functions/expand-task.js');
-						
+						const { expandJiraTaskDirect } = await import(
+							'../../mcp-server/src/core/direct-functions/expand-task.js'
+						);
+
 						// Call the Jira implementation
 						const result = await expandJiraTaskDirect(
 							{
@@ -1541,13 +1608,17 @@ function registerCommands(programInstance) {
 							},
 							{ session: process.env }
 						);
-						
+
 						if (!result.success) {
 							console.error(chalk.red(`Error: ${result.error.message}`));
 							process.exit(1);
 						}
-						
-						console.log(chalk.green(`Successfully created ${result.data.subtasksCount} subtasks for Jira issue ${idArg}`));
+
+						console.log(
+							chalk.green(
+								`Successfully created ${result.data.subtasksCount} subtasks for Jira issue ${idArg}`
+							)
+						);
 					} else {
 						// Use the local implementation
 						await expandTask(
@@ -1576,9 +1647,11 @@ function registerCommands(programInstance) {
 	// analyze-complexity command
 	programInstance
 		.command('analyze-complexity')
-		.description(() => JiraClient.isJiraEnabled() 
-			? 'Analyze Jira issues and generate expansion recommendations' 
-			: 'Analyze tasks and generate expansion recommendations')
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? 'Analyze Jira issues and generate expansion recommendations'
+				: 'Analyze tasks and generate expansion recommendations'
+		)
 		.option(
 			'-o, --output <file>',
 			'Output file path for the report',
@@ -1598,9 +1671,8 @@ function registerCommands(programInstance) {
 			'-r, --research',
 			'Use Perplexity AI for research-backed complexity analysis'
 		)
-		.option(
-			'--parent-key <key>',
-			() => JiraClient.isJiraEnabled()
+		.option('--parent-key <key>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Parent Jira issue key to filter tasks by'
 				: 'Parent Jira issue key (only used when Jira is enabled)'
 		)
@@ -1615,8 +1687,14 @@ function registerCommands(programInstance) {
 
 			if (isJiraEnabled) {
 				// Jira mode
-				console.log(chalk.blue(`Analyzing Jira issue complexity${parentKey ? ` from parent ${parentKey}` : ''}`));
-				console.log(chalk.blue(`Output report will be saved to: ${outputPath}`));
+				console.log(
+					chalk.blue(
+						`Analyzing Jira issue complexity${parentKey ? ` from parent ${parentKey}` : ''}`
+					)
+				);
+				console.log(
+					chalk.blue(`Output report will be saved to: ${outputPath}`)
+				);
 
 				if (useResearch) {
 					console.log(
@@ -1628,8 +1706,10 @@ function registerCommands(programInstance) {
 
 				try {
 					// Import and call analyzeJiraComplexityDirect
-					const { analyzeJiraComplexityDirect } = await import('../../mcp-server/src/core/direct-functions/analyze-task-complexity.js');
-					
+					const { analyzeJiraComplexityDirect } = await import(
+						'../../mcp-server/src/core/direct-functions/analyze-task-complexity.js'
+					);
+
 					const result = await analyzeJiraComplexityDirect(
 						{
 							parentKey,
@@ -1645,26 +1725,46 @@ function registerCommands(programInstance) {
 						},
 						{ session: process.env }
 					);
-					
+
 					if (!result.success) {
 						console.error(chalk.red(`Error: ${result.error.message}`));
 						process.exit(1);
 					}
-					
+
 					console.log(chalk.green(result.data.message));
-					
+
 					// Display summary of the analysis
 					const summary = result.data.reportSummary;
 					if (summary) {
 						console.log(chalk.green(`\nAnalysis Summary:`));
-						console.log(chalk.white(`Total issues analyzed: ${summary.taskCount}`));
-						console.log(chalk.red(`High complexity issues (8-10): ${summary.highComplexityTasks}`));
-						console.log(chalk.yellow(`Medium complexity issues (5-7): ${summary.mediumComplexityTasks}`));
-						console.log(chalk.green(`Low complexity issues (1-4): ${summary.lowComplexityTasks}`));
-						console.log(chalk.blue(`\nRun 'task-master complexity-report' to see the full report`));
+						console.log(
+							chalk.white(`Total issues analyzed: ${summary.taskCount}`)
+						);
+						console.log(
+							chalk.red(
+								`High complexity issues (8-10): ${summary.highComplexityTasks}`
+							)
+						);
+						console.log(
+							chalk.yellow(
+								`Medium complexity issues (5-7): ${summary.mediumComplexityTasks}`
+							)
+						);
+						console.log(
+							chalk.green(
+								`Low complexity issues (1-4): ${summary.lowComplexityTasks}`
+							)
+						);
+						console.log(
+							chalk.blue(
+								`\nRun 'task-master complexity-report' to see the full report`
+							)
+						);
 					}
 				} catch (error) {
-					console.error(chalk.red(`Error analyzing Jira issue complexity: ${error.message}`));
+					console.error(
+						chalk.red(`Error analyzing Jira issue complexity: ${error.message}`)
+					);
 					if (getDebugFlag()) {
 						console.error(error);
 					}
@@ -1673,7 +1773,9 @@ function registerCommands(programInstance) {
 			} else {
 				// Local mode (original implementation)
 				console.log(chalk.blue(`Analyzing task complexity from: ${tasksPath}`));
-				console.log(chalk.blue(`Output report will be saved to: ${outputPath}`));
+				console.log(
+					chalk.blue(`Output report will be saved to: ${outputPath}`)
+				);
 
 				if (useResearch) {
 					console.log(
@@ -1690,19 +1792,19 @@ function registerCommands(programInstance) {
 	// clear-subtasks command
 	programInstance
 		.command('clear-subtasks')
-		.description(() => JiraClient.isJiraEnabled() 
-			? 'Clear subtasks from Jira parent issues' 
-			: 'Clear subtasks from specified tasks')
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? 'Clear subtasks from Jira parent issues'
+				: 'Clear subtasks from specified tasks'
+		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
-		.option(
-			'-i, --id <ids>',
-			() => JiraClient.isJiraEnabled() 
-				? 'Jira issue key to clear subtasks from' 
+		.option('-i, --id <ids>', () =>
+			JiraClient.isJiraEnabled()
+				? 'Jira issue key to clear subtasks from'
 				: 'Task IDs (comma-separated) to clear subtasks from'
 		)
-		.option(
-			'--parent-key <key>',
-			() => JiraClient.isJiraEnabled()
+		.option('--parent-key <key>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Parent Jira issue key to clear subtasks from'
 				: 'Parent Jira issue key (only used when Jira is enabled)'
 		)
@@ -1722,49 +1824,60 @@ function registerCommands(programInstance) {
 				);
 				process.exit(1);
 			}
-			
+
 			if (isJiraEnabled) {
 				// Jira mode
 				try {
 					// Import the clearJiraSubtasksDirect function
-					const { clearJiraSubtasksDirect } = await import('../../mcp-server/src/core/direct-functions/clear-subtasks.js');
-					
+					const { clearJiraSubtasksDirect } = await import(
+						'../../mcp-server/src/core/direct-functions/clear-subtasks.js'
+					);
+
 					// Create a logger for the direct function
 					const log = {
 						info: (msg) => console.log(chalk.blue(msg)),
 						warn: (msg) => console.log(chalk.yellow(msg)),
 						error: (msg) => console.error(chalk.red(msg))
 					};
-					
+
 					// Call the direct function
 					const result = await clearJiraSubtasksDirect(
-						{ 
+						{
 							parentKey: parentKey || taskIds, // Use either parentKey or taskIds as the Jira parent key
-							all 
+							all
 						},
 						log,
 						{ session: process.env }
 					);
-					
+
 					if (!result.success) {
 						console.error(chalk.red(`Error: ${result.error.message}`));
 						process.exit(1);
 					}
-					
+
 					console.log(chalk.green(result.data.message));
-					
+
 					// Display summary of cleared subtasks
 					if (result.data.results && result.data.results.length > 0) {
-						result.data.results.forEach(parent => {
-							console.log(chalk.blue(`Parent ${parent.parentKey}: ${parent.title}`));
-							console.log(chalk.blue(`Subtasks removed: ${parent.subtasksRemoved}`));
-							
+						result.data.results.forEach((parent) => {
+							console.log(
+								chalk.blue(`Parent ${parent.parentKey}: ${parent.title}`)
+							);
+							console.log(
+								chalk.blue(`Subtasks removed: ${parent.subtasksRemoved}`)
+							);
+
 							if (parent.subtasks && parent.subtasks.length > 0) {
-								parent.subtasks.forEach(subtask => {
-									const statusColor = subtask.status === 'removed' ? chalk.green : chalk.red;
-									console.log(`  ${statusColor(`${subtask.key}: ${subtask.title} (${subtask.status})`)}`);
+								parent.subtasks.forEach((subtask) => {
+									const statusColor =
+										subtask.status === 'removed' ? chalk.green : chalk.red;
+									console.log(
+										`  ${statusColor(`${subtask.key}: ${subtask.title} (${subtask.status})`)}`
+									);
 									if (subtask.error) {
-										console.log(`    ${chalk.red(`Error: ${subtask.error.message}`)}`);
+										console.log(
+											`    ${chalk.red(`Error: ${subtask.error.message}`)}`
+										);
 									}
 								});
 							}
@@ -1772,7 +1885,9 @@ function registerCommands(programInstance) {
 						});
 					}
 				} catch (error) {
-					console.error(chalk.red(`Error clearing Jira subtasks: ${error.message}`));
+					console.error(
+						chalk.red(`Error clearing Jira subtasks: ${error.message}`)
+					);
 					if (getDebugFlag()) {
 						console.error(error);
 					}
@@ -1798,19 +1913,19 @@ function registerCommands(programInstance) {
 	// add-task command
 	programInstance
 		.command('add-task')
-		.description(() => JiraClient.isJiraEnabled() 
-			? 'Add a new Jira issue' 
-			: 'Add a new task using AI or manual input')
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? 'Add a new Jira issue'
+				: 'Add a new task using AI or manual input'
+		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
-		.option(
-			'-p, --prompt <prompt>',
-			() => JiraClient.isJiraEnabled()
+		.option('-p, --prompt <prompt>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Description of the Jira issue to add (alternative to manual fields)'
 				: 'Description of the task to add (required if not using manual fields)'
 		)
-		.option(
-			'-t, --title <title>',
-			() => JiraClient.isJiraEnabled()
+		.option('-t, --title <title>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Title/summary for the Jira issue (required for manual creation)'
 				: 'Task title (for manual task creation)'
 		)
@@ -1826,51 +1941,48 @@ function registerCommands(programInstance) {
 			'--test-strategy <testStrategy>',
 			'Test strategy (for manual creation)'
 		)
-		.option(
-			'--acceptance-criteria <criteria>',
-			() => JiraClient.isJiraEnabled()
+		.option('--acceptance-criteria <criteria>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Acceptance criteria for the Jira issue'
 				: 'Acceptance criteria (for manual task creation)'
 		)
-		.option(
-			'--dependencies <dependencies>',
-			() => JiraClient.isJiraEnabled()
+		.option('--dependencies <dependencies>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Not applicable for Jira issues - use add-dependency command'
 				: 'Comma-separated list of task IDs this task depends on'
 		)
 		.option(
 			'--priority <priority>',
-			() => JiraClient.isJiraEnabled()
-				? 'Jira priority (e.g., "Medium", "High")'
-				: 'Task priority (high, medium, low)',
+			() =>
+				JiraClient.isJiraEnabled()
+					? 'Jira priority (e.g., "Medium", "High")'
+					: 'Task priority (high, medium, low)',
 			'medium'
 		)
 		.option(
 			'-r, --research',
 			'Whether to use research capabilities for task/issue creation'
 		)
-		.option(
-			'--parent-key <key>',
-			() => JiraClient.isJiraEnabled()
+		.option('--parent-key <key>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Parent Jira issue key to link this issue to (e.g., "PROJ-123")'
 				: 'Parent Jira issue key (only used when Jira is enabled)'
 		)
 		.option(
 			'--issue-type <type>',
-			() => JiraClient.isJiraEnabled()
-				? 'Jira issue type (e.g., "Task", "Story", "Bug")'
-				: 'Jira issue type (only used when Jira is enabled)',
+			() =>
+				JiraClient.isJiraEnabled()
+					? 'Jira issue type (e.g., "Task", "Story", "Bug")'
+					: 'Jira issue type (only used when Jira is enabled)',
 			'Task'
 		)
-		.option(
-			'--assignee <assignee>',
-			() => JiraClient.isJiraEnabled()
+		.option('--assignee <assignee>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Jira account ID or email of the assignee'
 				: 'Jira assignee (only used when Jira is enabled)'
 		)
-		.option(
-			'--labels <labels>',
-			() => JiraClient.isJiraEnabled()
+		.option('--labels <labels>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Comma-separated list of labels to add to the Jira issue'
 				: 'Jira labels (only used when Jira is enabled)'
 		)
@@ -1891,14 +2003,16 @@ function registerCommands(programInstance) {
 			try {
 				if (isJiraEnabled) {
 					// Import the addJiraTaskDirect function
-					const { addJiraTaskDirect } = await import('../../mcp-server/src/core/direct-functions/add-task.js');
-					
+					const { addJiraTaskDirect } = await import(
+						'../../mcp-server/src/core/direct-functions/add-task.js'
+					);
+
 					// Prepare labels if provided
 					let labels = [];
 					if (options.labels) {
-						labels = options.labels.split(',').map(label => label.trim());
+						labels = options.labels.split(',').map((label) => label.trim());
 					}
-					
+
 					// Prepare args for Jira task creation
 					const args = {
 						title: options.title || '',
@@ -1912,16 +2026,28 @@ function registerCommands(programInstance) {
 						assignee: options.assignee || null,
 						labels: labels
 					};
-					
+
 					// If prompt is provided without manual details, use AI to generate
 					if (options.prompt && !isManualCreation) {
-						console.log(chalk.blue(`Creating Jira issue with AI using prompt: "${options.prompt}"`));
+						console.log(
+							chalk.blue(
+								`Creating Jira issue with AI using prompt: "${options.prompt}"`
+							)
+						);
 						// For prompt-based creation, need to implement AI-based Jira task creation
 						// For now, we'll just report that this isn't implemented yet
-						console.error(chalk.yellow('AI-based Jira issue creation is not yet implemented. Please use manual fields.'));
+						console.error(
+							chalk.yellow(
+								'AI-based Jira issue creation is not yet implemented. Please use manual fields.'
+							)
+						);
 						process.exit(1);
 					} else {
-						console.log(chalk.blue(`Creating Jira issue manually with title: "${options.title}"`));
+						console.log(
+							chalk.blue(
+								`Creating Jira issue manually with title: "${options.title}"`
+							)
+						);
 						if (options.parentKey) {
 							console.log(chalk.blue(`Parent/Epic key: ${options.parentKey}`));
 						}
@@ -1932,7 +2058,7 @@ function registerCommands(programInstance) {
 							console.log(chalk.blue(`Issue type: ${options.issueType}`));
 						}
 					}
-					
+
 					// Call the Jira implementation
 					const result = await addJiraTaskDirect(
 						args,
@@ -1943,12 +2069,18 @@ function registerCommands(programInstance) {
 						},
 						{ session: process.env }
 					);
-					
+
 					if (result.success) {
-						console.log(chalk.green(`✓ Added new Jira issue ${result.data.key}`));
-						console.log(chalk.gray('Next: Complete this issue or add more issues'));
+						console.log(
+							chalk.green(`✓ Added new Jira issue ${result.data.key}`)
+						);
+						console.log(
+							chalk.gray('Next: Complete this issue or add more issues')
+						);
 					} else {
-						console.error(chalk.red(`Error adding Jira issue: ${result.error.message}`));
+						console.error(
+							chalk.red(`Error adding Jira issue: ${result.error.message}`)
+						);
 						process.exit(1);
 					}
 				} else {
@@ -1972,7 +2104,9 @@ function registerCommands(programInstance) {
 						};
 
 						console.log(
-							chalk.blue(`Creating task manually with title: "${options.title}"`)
+							chalk.blue(
+								`Creating task manually with title: "${options.title}"`
+							)
 						);
 						if (dependencies.length > 0) {
 							console.log(
@@ -2026,25 +2160,27 @@ function registerCommands(programInstance) {
 	// next command
 	programInstance
 		.command('next')
-		.description(() => JiraClient.isJiraEnabled() 
-			? `Find the next Jira issue to work on based on dependencies and status${chalk.reset('')}` 
-			: `Show the next task to work on based on dependencies and status${chalk.reset('')}`
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? `Find the next Jira issue to work on based on dependencies and status${chalk.reset('')}`
+				: `Show the next task to work on based on dependencies and status${chalk.reset('')}`
 		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
-		.option(
-			'--parent-key <key>',
-			() => JiraClient.isJiraEnabled()
+		.option('--parent-key <key>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Parent Jira issue key to filter tasks by'
 				: 'Parent Jira issue key (only used when Jira is enabled)'
 		)
 		.action(async (options) => {
 			try {
 				const isJiraEnabled = JiraClient.isJiraEnabled();
-				
+
 				if (isJiraEnabled) {
 					// Import the nextJiraTaskDirect function
-					const { nextJiraTaskDirect } = await import('../../mcp-server/src/core/direct-functions/next-task.js');
-					
+					const { nextJiraTaskDirect } = await import(
+						'../../mcp-server/src/core/direct-functions/next-task.js'
+					);
+
 					// Call the Jira implementation
 					const result = await nextJiraTaskDirect(
 						{
@@ -2056,12 +2192,16 @@ function registerCommands(programInstance) {
 							error: (msg) => console.error(chalk.red(msg))
 						}
 					);
-					
+
 					if (!result.success) {
-						console.error(chalk.red(`Error finding next Jira issue: ${result.error.message}`));
+						console.error(
+							chalk.red(
+								`Error finding next Jira issue: ${result.error.message}`
+							)
+						);
 						process.exit(1);
 					}
-					
+
 					if (!result.data.nextTask) {
 						console.log(
 							boxen(
@@ -2077,17 +2217,22 @@ function registerCommands(programInstance) {
 						);
 						return;
 					}
-					
+
 					// Display the Jira issue in a similar format to displayNextTask
 					console.log(
-						boxen(chalk.white.bold(`Next Issue: ${result.data.nextTask.id} - ${result.data.nextTask.title}`), {
-							padding: { top: 0, bottom: 0, left: 1, right: 1 },
-							borderColor: 'blue',
-							borderStyle: 'round',
-							margin: { top: 1, bottom: 0 }
-						})
+						boxen(
+							chalk.white.bold(
+								`Next Issue: ${result.data.nextTask.id} - ${result.data.nextTask.title}`
+							),
+							{
+								padding: { top: 0, bottom: 0, left: 1, right: 1 },
+								borderColor: 'blue',
+								borderStyle: 'round',
+								margin: { top: 1, bottom: 0 }
+							}
+						)
 					);
-					
+
 					// Create a table with issue details (similar to task table)
 					const issueTable = new Table({
 						style: {
@@ -2106,23 +2251,37 @@ function registerCommands(programInstance) {
 						colWidths: [15, Math.min(75, process.stdout.columns - 20 || 60)],
 						wordWrap: true
 					});
-					
+
 					// Add issue details to table
 					issueTable.push(
 						[chalk.cyan.bold('ID:'), result.data.nextTask.id],
 						[chalk.cyan.bold('Title:'), result.data.nextTask.title],
-						[chalk.cyan.bold('Status:'), result.data.nextTask.status || 'To Do'],
-						[chalk.cyan.bold('Priority:'), result.data.nextTask.priority || 'Medium'],
-						[chalk.cyan.bold('Description:'), result.data.nextTask.description || 'No description provided']
+						[
+							chalk.cyan.bold('Status:'),
+							result.data.nextTask.status || 'To Do'
+						],
+						[
+							chalk.cyan.bold('Priority:'),
+							result.data.nextTask.priority || 'Medium'
+						],
+						[
+							chalk.cyan.bold('Description:'),
+							result.data.nextTask.description || 'No description provided'
+						]
 					);
-					
+
 					console.log(issueTable.toString());
-					
+
 					// Show details if they exist
-					if (result.data.nextTask.details && result.data.nextTask.details.trim().length > 0) {
+					if (
+						result.data.nextTask.details &&
+						result.data.nextTask.details.trim().length > 0
+					) {
 						console.log(
 							boxen(
-								chalk.white.bold('Implementation Details:') + '\n\n' + result.data.nextTask.details,
+								chalk.white.bold('Implementation Details:') +
+									'\n\n' +
+									result.data.nextTask.details,
 								{
 									padding: { top: 0, bottom: 0, left: 1, right: 1 },
 									borderColor: 'cyan',
@@ -2132,9 +2291,12 @@ function registerCommands(programInstance) {
 							)
 						);
 					}
-					
+
 					// Show subtasks if they exist
-					if (result.data.nextTask.subtasks && result.data.nextTask.subtasks.length > 0) {
+					if (
+						result.data.nextTask.subtasks &&
+						result.data.nextTask.subtasks.length > 0
+					) {
 						console.log(
 							boxen(chalk.white.bold('Subtasks'), {
 								padding: { top: 0, bottom: 0, left: 1, right: 1 },
@@ -2143,7 +2305,7 @@ function registerCommands(programInstance) {
 								borderStyle: 'round'
 							})
 						);
-						
+
 						// Create a table for subtasks
 						const subtaskTable = new Table({
 							head: [
@@ -2162,7 +2324,7 @@ function registerCommands(programInstance) {
 							},
 							wordWrap: true
 						});
-						
+
 						// Add subtasks to table
 						result.data.nextTask.subtasks.forEach((st) => {
 							subtaskTable.push([
@@ -2172,16 +2334,17 @@ function registerCommands(programInstance) {
 								st.priority || 'Medium'
 							]);
 						});
-						
+
 						console.log(subtaskTable.toString());
 					}
-					
+
 					// Show suggested next steps
 					console.log(
 						boxen(
-							chalk.white.bold('Suggested Actions:') + '\n\n' +
-							`${chalk.cyan('1.')} Run ${chalk.yellow(`task-master set-status --id="${result.data.nextTask.id}" --status="In Progress"`)} to start working\n` +
-							`${chalk.cyan('2.')} Run ${chalk.yellow(`task-master expand --id="${result.data.nextTask.id}"`)} to break this issue into subtasks`,
+							chalk.white.bold('Suggested Actions:') +
+								'\n\n' +
+								`${chalk.cyan('1.')} Run ${chalk.yellow(`task-master set-status --id="${result.data.nextTask.id}" --status="In Progress"`)} to start working\n` +
+								`${chalk.cyan('2.')} Run ${chalk.yellow(`task-master expand --id="${result.data.nextTask.id}"`)} to break this issue into subtasks`,
 							{
 								padding: { top: 0, bottom: 0, left: 1, right: 1 },
 								borderColor: 'green',
@@ -2203,23 +2366,24 @@ function registerCommands(programInstance) {
 	// show command
 	programInstance
 		.command('show')
-		.description(() => JiraClient.isJiraEnabled() 
-			? `Display detailed information about a specific Jira issue${chalk.reset('')}` 
-			: `Display detailed information about a specific task${chalk.reset('')}`
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? `Display detailed information about a specific Jira issue${chalk.reset('')}`
+				: `Display detailed information about a specific task${chalk.reset('')}`
 		)
 		.argument('[id]', 'ID to show')
-		.option(
-			'-i, --id <id>', 
-			() => JiraClient.isJiraEnabled() 
-				? 'Jira issue key to show details for (e.g., "PROJ-123")' 
+		.option('-i, --id <id>', () =>
+			JiraClient.isJiraEnabled()
+				? 'Jira issue key to show details for (e.g., "PROJ-123")'
 				: 'Task ID to show'
 		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
 		.option(
-			'--with-subtasks', 
-			() => JiraClient.isJiraEnabled() 
-				? 'Include subtasks in the Jira issue details' 
-				: 'Include subtasks in the task details (default for tasks)',
+			'--with-subtasks',
+			() =>
+				JiraClient.isJiraEnabled()
+					? 'Include subtasks in the Jira issue details'
+					: 'Include subtasks in the task details (default for tasks)',
 			JiraClient.isJiraEnabled() ? false : true
 		)
 		.action(async (taskId, options) => {
@@ -2234,8 +2398,10 @@ function registerCommands(programInstance) {
 
 				if (isJiraEnabled) {
 					// Import the showJiraTask function
-					const { showJiraTaskDirect } = await import('../../mcp-server/src/core/direct-functions/show-task.js');
-					
+					const { showJiraTaskDirect } = await import(
+						'../../mcp-server/src/core/direct-functions/show-task.js'
+					);
+
 					// Call the Jira implementation
 					const result = await showJiraTaskDirect(
 						{
@@ -2255,7 +2421,7 @@ function registerCommands(programInstance) {
 					}
 
 					const issue = result.data.task;
-					
+
 					// Create a table for the issue details
 					const issueTable = new Table({
 						style: {
@@ -2266,23 +2432,31 @@ function registerCommands(programInstance) {
 						},
 						wordWrap: true
 					});
-					
+
 					// Add issue details to the table
 					issueTable.push(
 						[chalk.cyan.bold('Issue Key:'), issue.id || idArg],
-						[chalk.cyan.bold('Title:'), issue.title || issue.summary || 'No title'],
+						[
+							chalk.cyan.bold('Title:'),
+							issue.title || issue.summary || 'No title'
+						],
 						[chalk.cyan.bold('Status:'), issue.status || 'To Do'],
 						[chalk.cyan.bold('Priority:'), issue.priority || 'Medium'],
-						[chalk.cyan.bold('Description:'), issue.description || 'No description provided']
+						[
+							chalk.cyan.bold('Description:'),
+							issue.description || 'No description provided'
+						]
 					);
-					
+
 					console.log(issueTable.toString());
-					
+
 					// Show details if they exist
 					if (issue.details && issue.details.trim().length > 0) {
 						console.log(
 							boxen(
-								chalk.white.bold('Implementation Details:') + '\n\n' + issue.details,
+								chalk.white.bold('Implementation Details:') +
+									'\n\n' +
+									issue.details,
 								{
 									padding: { top: 0, bottom: 0, left: 1, right: 1 },
 									borderColor: 'cyan',
@@ -2292,7 +2466,7 @@ function registerCommands(programInstance) {
 							)
 						);
 					}
-					
+
 					// Show subtasks if they exist
 					if (issue.subtasks && issue.subtasks.length > 0) {
 						console.log(
@@ -2303,7 +2477,7 @@ function registerCommands(programInstance) {
 								borderStyle: 'round'
 							})
 						);
-						
+
 						// Create a table for subtasks
 						const subtaskTable = new Table({
 							head: [
@@ -2322,7 +2496,7 @@ function registerCommands(programInstance) {
 							},
 							wordWrap: true
 						});
-						
+
 						// Add subtasks to table
 						issue.subtasks.forEach((st) => {
 							subtaskTable.push([
@@ -2332,16 +2506,17 @@ function registerCommands(programInstance) {
 								st.priority || 'Medium'
 							]);
 						});
-						
+
 						console.log(subtaskTable.toString());
 					}
-					
+
 					// Show suggested next steps
 					console.log(
 						boxen(
-							chalk.white.bold('Suggested Actions:') + '\n\n' +
-							`${chalk.cyan('1.')} Run ${chalk.yellow(`task-master set-status --id="${issue.id}" --status="In Progress"`)} to start working\n` +
-							`${chalk.cyan('2.')} Run ${chalk.yellow(`task-master expand --id="${issue.id}"`)} to break this issue into subtasks`,
+							chalk.white.bold('Suggested Actions:') +
+								'\n\n' +
+								`${chalk.cyan('1.')} Run ${chalk.yellow(`task-master set-status --id="${issue.id}" --status="In Progress"`)} to start working\n` +
+								`${chalk.cyan('2.')} Run ${chalk.yellow(`task-master expand --id="${issue.id}"`)} to break this issue into subtasks`,
 							{
 								padding: { top: 0, bottom: 0, left: 1, right: 1 },
 								borderColor: 'green',
@@ -2363,18 +2538,18 @@ function registerCommands(programInstance) {
 	// add-dependency command
 	programInstance
 		.command('add-dependency')
-		.description(() => JiraClient.isJiraEnabled() 
-			? 'Add a dependency relationship between two Jira issues' 
-			: 'Add a dependency to a task')
-		.option(
-			'-i, --id <id>', 
-			() => JiraClient.isJiraEnabled()
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? 'Add a dependency relationship between two Jira issues'
+				: 'Add a dependency to a task'
+		)
+		.option('-i, --id <id>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Jira issue key that will depend on another issue (e.g., "PROJ-123")'
 				: 'Task ID to add dependency to'
 		)
-		.option(
-			'-d, --depends-on <id>', 
-			() => JiraClient.isJiraEnabled()
+		.option('-d, --depends-on <id>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Jira issue key that will become a dependency (e.g., "PROJ-456")'
 				: 'Task ID that will become a dependency'
 		)
@@ -2394,8 +2569,10 @@ function registerCommands(programInstance) {
 
 				if (isJiraEnabled) {
 					// Import the addJiraDependencyDirect function
-					const { addJiraDependencyDirect } = await import('../../mcp-server/src/core/direct-functions/add-dependency.js');
-					
+					const { addJiraDependencyDirect } = await import(
+						'../../mcp-server/src/core/direct-functions/add-dependency.js'
+					);
+
 					// Call the Jira implementation
 					const result = await addJiraDependencyDirect(
 						{
@@ -2409,7 +2586,7 @@ function registerCommands(programInstance) {
 						},
 						{ session: process.env }
 					);
-					
+
 					if (result.success) {
 						console.log(chalk.green(result.data.message));
 					} else {
@@ -2426,7 +2603,11 @@ function registerCommands(programInstance) {
 						? dependencyId
 						: parseInt(dependencyId, 10);
 
-					await addDependency(options.file, formattedTaskId, formattedDependencyId);
+					await addDependency(
+						options.file,
+						formattedTaskId,
+						formattedDependencyId
+					);
 				}
 			} catch (error) {
 				console.error(chalk.red(`Error: ${error.message}`));
@@ -2437,18 +2618,18 @@ function registerCommands(programInstance) {
 	// remove-dependency command
 	programInstance
 		.command('remove-dependency')
-		.description(() => JiraClient.isJiraEnabled() 
-			? 'Remove a dependency relationship between two Jira issues' 
-			: 'Remove a dependency from a task')
-		.option(
-			'-i, --id <id>', 
-			() => JiraClient.isJiraEnabled()
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? 'Remove a dependency relationship between two Jira issues'
+				: 'Remove a dependency from a task'
+		)
+		.option('-i, --id <id>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Jira issue key to remove dependency from (e.g., "PROJ-123")'
 				: 'Task ID to remove dependency from'
 		)
-		.option(
-			'-d, --depends-on <id>', 
-			() => JiraClient.isJiraEnabled()
+		.option('-d, --depends-on <id>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Jira issue key to remove as a dependency (e.g., "PROJ-456")'
 				: 'Task ID to remove as a dependency'
 		)
@@ -2468,8 +2649,10 @@ function registerCommands(programInstance) {
 
 				if (isJiraEnabled) {
 					// Import the removeJiraDependencyDirect function
-					const { removeJiraDependencyDirect } = await import('../../mcp-server/src/core/direct-functions/remove-dependency.js');
-					
+					const { removeJiraDependencyDirect } = await import(
+						'../../mcp-server/src/core/direct-functions/remove-dependency.js'
+					);
+
 					// Call the Jira implementation
 					const result = await removeJiraDependencyDirect(
 						{
@@ -2483,7 +2666,7 @@ function registerCommands(programInstance) {
 						},
 						{ session: process.env }
 					);
-					
+
 					if (result.success) {
 						console.log(chalk.green(result.data.message));
 					} else {
@@ -2500,7 +2683,11 @@ function registerCommands(programInstance) {
 						? dependencyId
 						: parseInt(dependencyId, 10);
 
-					await removeDependency(options.file, formattedTaskId, formattedDependencyId);
+					await removeDependency(
+						options.file,
+						formattedTaskId,
+						formattedDependencyId
+					);
 				}
 			} catch (error) {
 				console.error(chalk.red(`Error: ${error.message}`));
@@ -2511,25 +2698,27 @@ function registerCommands(programInstance) {
 	// validate-dependencies command
 	programInstance
 		.command('validate-dependencies')
-		.description(() => JiraClient.isJiraEnabled()
-			? `Identify invalid dependencies in Jira issues without fixing them${chalk.reset('')}`
-			: `Identify invalid dependencies without fixing them${chalk.reset('')}`
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? `Identify invalid dependencies in Jira issues without fixing them${chalk.reset('')}`
+				: `Identify invalid dependencies without fixing them${chalk.reset('')}`
 		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
-		.option(
-			'--parent-key <key>',
-			() => JiraClient.isJiraEnabled()
+		.option('--parent-key <key>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Parent Jira issue key to filter tasks by'
 				: 'Parent Jira issue key (only used when Jira is enabled)'
 		)
 		.action(async (options) => {
 			try {
 				const isJiraEnabled = JiraClient.isJiraEnabled();
-				
+
 				if (isJiraEnabled) {
 					// Import the validateJiraDependenciesDirect function
-					const { validateJiraDependenciesDirect } = await import('../../mcp-server/src/core/direct-functions/validate-dependencies.js');
-					
+					const { validateJiraDependenciesDirect } = await import(
+						'../../mcp-server/src/core/direct-functions/validate-dependencies.js'
+					);
+
 					// Call the Jira implementation
 					const result = await validateJiraDependenciesDirect(
 						{
@@ -2542,21 +2731,37 @@ function registerCommands(programInstance) {
 						},
 						{ session: process.env }
 					);
-					
+
 					if (result.success) {
 						const validDependencies = result.data.validDependencies || [];
 						const invalidDependencies = result.data.invalidDependencies || [];
-						
-						console.log(chalk.green(`✓ Found ${validDependencies.length} valid dependencies`));
-						
+
+						console.log(
+							chalk.green(
+								`✓ Found ${validDependencies.length} valid dependencies`
+							)
+						);
+
 						if (invalidDependencies.length > 0) {
-							console.log(chalk.yellow(`⚠ Found ${invalidDependencies.length} invalid dependencies:`));
-							invalidDependencies.forEach(issue => {
-								console.log(chalk.yellow(` - ${issue.message || JSON.stringify(issue)}`));
+							console.log(
+								chalk.yellow(
+									`⚠ Found ${invalidDependencies.length} invalid dependencies:`
+								)
+							);
+							invalidDependencies.forEach((issue) => {
+								console.log(
+									chalk.yellow(` - ${issue.message || JSON.stringify(issue)}`)
+								);
 							});
-							console.log(chalk.blue('Run `task-master fix-dependencies` to automatically fix these issues.'));
+							console.log(
+								chalk.blue(
+									'Run `task-master fix-dependencies` to automatically fix these issues.'
+								)
+							);
 						} else {
-							console.log(chalk.green('No dependency issues found in Jira issues.'));
+							console.log(
+								chalk.green('No dependency issues found in Jira issues.')
+							);
 						}
 					} else {
 						console.error(chalk.red(`Error: ${result.error.message}`));
@@ -2574,25 +2779,27 @@ function registerCommands(programInstance) {
 	// fix-dependencies command
 	programInstance
 		.command('fix-dependencies')
-		.description(() => JiraClient.isJiraEnabled()
-			? `Fix invalid dependencies in Jira issues automatically${chalk.reset('')}`
-			: `Fix invalid dependencies automatically${chalk.reset('')}`
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? `Fix invalid dependencies in Jira issues automatically${chalk.reset('')}`
+				: `Fix invalid dependencies automatically${chalk.reset('')}`
 		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
-		.option(
-			'--parent-key <key>',
-			() => JiraClient.isJiraEnabled()
+		.option('--parent-key <key>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Parent Jira issue key to filter tasks by'
 				: 'Parent Jira issue key (only used when Jira is enabled)'
 		)
 		.action(async (options) => {
 			try {
 				const isJiraEnabled = JiraClient.isJiraEnabled();
-				
+
 				if (isJiraEnabled) {
 					// Import the fixJiraDependenciesDirect function
-					const { fixJiraDependenciesDirect } = await import('../../mcp-server/src/core/direct-functions/fix-dependencies.js');
-					
+					const { fixJiraDependenciesDirect } = await import(
+						'../../mcp-server/src/core/direct-functions/fix-dependencies.js'
+					);
+
 					// Call the Jira implementation
 					const result = await fixJiraDependenciesDirect(
 						{
@@ -2605,26 +2812,42 @@ function registerCommands(programInstance) {
 						},
 						{ session: process.env }
 					);
-					
+
 					if (result.success) {
 						const fixedDependencies = result.data.fixedDependencies || [];
 						const remainingIssues = result.data.remainingIssues || [];
-						
+
 						if (fixedDependencies.length > 0) {
-							console.log(chalk.green(`✓ Fixed ${fixedDependencies.length} dependency issues:`));
-							fixedDependencies.forEach(issue => {
-								console.log(chalk.green(` - ${issue.message || JSON.stringify(issue)}`));
+							console.log(
+								chalk.green(
+									`✓ Fixed ${fixedDependencies.length} dependency issues:`
+								)
+							);
+							fixedDependencies.forEach((issue) => {
+								console.log(
+									chalk.green(` - ${issue.message || JSON.stringify(issue)}`)
+								);
 							});
 						} else {
-							console.log(chalk.green('No dependency issues needed to be fixed.'));
+							console.log(
+								chalk.green('No dependency issues needed to be fixed.')
+							);
 						}
-						
+
 						if (remainingIssues.length > 0) {
-							console.log(chalk.yellow(`⚠ ${remainingIssues.length} dependency issues could not be automatically fixed:`));
-							remainingIssues.forEach(issue => {
-								console.log(chalk.yellow(` - ${issue.message || JSON.stringify(issue)}`));
+							console.log(
+								chalk.yellow(
+									`⚠ ${remainingIssues.length} dependency issues could not be automatically fixed:`
+								)
+							);
+							remainingIssues.forEach((issue) => {
+								console.log(
+									chalk.yellow(` - ${issue.message || JSON.stringify(issue)}`)
+								);
 							});
-							console.log(chalk.blue('These issues may require manual intervention.'));
+							console.log(
+								chalk.blue('These issues may require manual intervention.')
+							);
 						}
 					} else {
 						console.error(chalk.red(`Error: ${result.error.message}`));
@@ -2655,36 +2878,31 @@ function registerCommands(programInstance) {
 	// add-subtask command
 	programInstance
 		.command('add-subtask')
-		.description(() => JiraClient.isJiraEnabled() 
-			? 'Add a new subtask under a Jira issue' 
-			: 'Add a subtask to an existing task')
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? 'Add a new subtask under a Jira issue'
+				: 'Add a subtask to an existing task'
+		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
-		.option(
-			'-p, --parent <id>', 
-			() => JiraClient.isJiraEnabled()
+		.option('-p, --parent <id>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Parent Jira issue key (e.g., "PROJ-123")'
 				: 'Parent task ID (required)'
 		)
-		.option(
-			'-i, --task-id <id>', 
-			() => JiraClient.isJiraEnabled()
+		.option('-i, --task-id <id>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Not applicable for Jira issues'
 				: 'Existing task ID to convert to subtask'
 		)
-		.option(
-			'-t, --title <title>',
-			() => JiraClient.isJiraEnabled()
+		.option('-t, --title <title>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Title/summary for the Jira subtask (required)'
 				: 'Title for the new subtask (when creating a new subtask)'
 		)
-		.option(
-			'-d, --description <text>', 
-			'Description for the new subtask'
-		)
+		.option('-d, --description <text>', 'Description for the new subtask')
 		.option('--details <text>', 'Implementation details for the new subtask')
-		.option(
-			'--dependencies <ids>',
-			() => JiraClient.isJiraEnabled()
+		.option('--dependencies <ids>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Not applicable for Jira issues - use add-dependency command'
 				: 'Comma-separated list of dependency IDs for the new subtask'
 		)
@@ -2700,51 +2918,60 @@ function registerCommands(programInstance) {
 		)
 		.option(
 			'--priority <priority>',
-			() => JiraClient.isJiraEnabled()
-				? 'Jira priority (e.g., "Medium", "High")'
-				: 'Task priority (high, medium, low)',
+			() =>
+				JiraClient.isJiraEnabled()
+					? 'Jira priority (e.g., "Medium", "High")'
+					: 'Task priority (high, medium, low)',
 			'medium'
 		)
-		.option(
-			'--assignee <assignee>',
-			() => JiraClient.isJiraEnabled()
+		.option('--assignee <assignee>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Jira account ID or email of the assignee'
 				: 'Jira assignee (only used when Jira is enabled)'
 		)
-		.option(
-			'--labels <labels>',
-			() => JiraClient.isJiraEnabled()
+		.option('--labels <labels>', () =>
+			JiraClient.isJiraEnabled()
 				? 'Comma-separated list of labels to add to the Jira subtask'
 				: 'Jira labels (only used when Jira is enabled)'
 		)
 		.action(async (options) => {
 			const isJiraEnabled = JiraClient.isJiraEnabled();
-			
+
 			if (isJiraEnabled) {
 				// Jira mode
 				const parentKey = options.parent;
 				const title = options.title;
-				
+
 				if (!parentKey) {
-					console.error(chalk.red('Error: --parent parameter is required. Please provide a parent Jira issue key.'));
+					console.error(
+						chalk.red(
+							'Error: --parent parameter is required. Please provide a parent Jira issue key.'
+						)
+					);
 					process.exit(1);
 				}
-				
+
 				if (!title) {
-					console.error(chalk.red('Error: --title parameter is required. Please provide a title for the subtask.'));
+					console.error(
+						chalk.red(
+							'Error: --title parameter is required. Please provide a title for the subtask.'
+						)
+					);
 					process.exit(1);
 				}
-				
+
 				try {
 					// Import the addJiraSubtaskDirect function
-					const { addJiraSubtaskDirect } = await import('../../mcp-server/src/core/direct-functions/add-subtask.js');
-					
+					const { addJiraSubtaskDirect } = await import(
+						'../../mcp-server/src/core/direct-functions/add-subtask.js'
+					);
+
 					// Prepare labels if provided
 					let labels = [];
 					if (options.labels) {
-						labels = options.labels.split(',').map(label => label.trim());
+						labels = options.labels.split(',').map((label) => label.trim());
 					}
-					
+
 					// Prepare args for Jira subtask creation
 					const args = {
 						parentKey,
@@ -2757,10 +2984,12 @@ function registerCommands(programInstance) {
 						assignee: options.assignee || null,
 						labels
 					};
-					
-					console.log(chalk.blue(`Creating Jira subtask for parent issue ${parentKey}`));
+
+					console.log(
+						chalk.blue(`Creating Jira subtask for parent issue ${parentKey}`)
+					);
 					console.log(chalk.blue(`Title: "${title}"`));
-					
+
 					// Call the Jira implementation
 					const result = await addJiraSubtaskDirect(
 						args,
@@ -2771,52 +3000,84 @@ function registerCommands(programInstance) {
 						},
 						{ session: process.env }
 					);
-					
+
 					if (!result.success) {
-						console.error(chalk.red(`Error adding Jira subtask: ${result.error.message || 'Unknown error'}`));
-						
+						console.error(
+							chalk.red(
+								`Error adding Jira subtask: ${result.error.message || 'Unknown error'}`
+							)
+						);
+
 						// Display more detailed troubleshooting info based on common error codes
 						if (result.error.code === 400 || result.error.code === '400') {
-							console.log(chalk.yellow('\nCommon causes for 400 Bad Request errors:'));
-							console.log('  1. The parent issue may not support subtasks (some types don\'t allow subtasks)');
-							console.log('  2. Required fields might be missing (title must be valid)');
-							console.log('  3. The parent issue might not exist or you don\'t have permission to access it');
-							console.log('  4. The Jira project might have custom required fields not provided');
-							
+							console.log(
+								chalk.yellow('\nCommon causes for 400 Bad Request errors:')
+							);
+							console.log(
+								"  1. The parent issue may not support subtasks (some types don't allow subtasks)"
+							);
+							console.log(
+								'  2. Required fields might be missing (title must be valid)'
+							);
+							console.log(
+								"  3. The parent issue might not exist or you don't have permission to access it"
+							);
+							console.log(
+								'  4. The Jira project might have custom required fields not provided'
+							);
+
 							console.log(chalk.yellow('\nTry the following:'));
-							console.log('  1. Check if you can manually create a subtask for this issue in Jira');
-							console.log('  2. Use only basic fields (title and description) without special characters');
-							console.log('  3. Verify Jira permissions and project configuration');
+							console.log(
+								'  1. Check if you can manually create a subtask for this issue in Jira'
+							);
+							console.log(
+								'  2. Use only basic fields (title and description) without special characters'
+							);
+							console.log(
+								'  3. Verify Jira permissions and project configuration'
+							);
 						} else {
 							// Generic troubleshooting tips
 							console.log(chalk.yellow('\nTroubleshooting tips:'));
-							console.log('  1. Verify that the parent issue exists and is not a subtask itself');
-							console.log('  2. Check that your Jira permissions allow creating subtasks');
-							console.log('  3. Validate that all required fields are properly formatted');
-							console.log('  4. Try with simpler values for title and description');
+							console.log(
+								'  1. Verify that the parent issue exists and is not a subtask itself'
+							);
+							console.log(
+								'  2. Check that your Jira permissions allow creating subtasks'
+							);
+							console.log(
+								'  3. Validate that all required fields are properly formatted'
+							);
+							console.log(
+								'  4. Try with simpler values for title and description'
+							);
 						}
-						
+
 						if (getDebugFlag()) {
 							console.log(chalk.yellow('\nJira API arguments:'));
 							console.log(JSON.stringify(args, null, 2));
-							
+
 							// If there are detailed error responses, display them
 							if (result.error.details) {
 								console.log(chalk.yellow('\nDetailed error information:'));
 								console.log(JSON.stringify(result.error.details, null, 2));
 							}
 						}
-						
+
 						process.exit(1);
 					} else {
 						// If successful, display success info
-						console.log(chalk.green(`✓ Added new Jira subtask ${result.data.key}`));
+						console.log(
+							chalk.green(`✓ Added new Jira subtask ${result.data.key}`)
+						);
 						console.log(chalk.gray(`Parent issue: ${parentKey}`));
-						
+
 						// Display success message and suggested next steps
 						console.log(
 							boxen(
-								chalk.white.bold(`Subtask ${result.data.key} Added Successfully`) +
+								chalk.white.bold(
+									`Subtask ${result.data.key} Added Successfully`
+								) +
 									'\n\n' +
 									chalk.white(`Title: ${title}`) +
 									'\n' +
@@ -2841,7 +3102,9 @@ function registerCommands(programInstance) {
 						);
 					}
 				} catch (error) {
-					console.error(chalk.red(`Error creating Jira subtask: ${error.message}`));
+					console.error(
+						chalk.red(`Error creating Jira subtask: ${error.message}`)
+					);
 					if (getDebugFlag()) {
 						console.error(error);
 					}
@@ -2993,46 +3256,54 @@ function registerCommands(programInstance) {
 	// remove-subtask command
 	programInstance
 		.command('remove-subtask')
-		.description(() => JiraClient.isJiraEnabled() 
-			? 'Remove a Jira subtask' 
-			: 'Remove a subtask from its parent task')
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? 'Remove a Jira subtask'
+				: 'Remove a subtask from its parent task'
+		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
-		.option(
-			'-i, --id <id>',
-			() => JiraClient.isJiraEnabled() 
-				? 'Jira issue key of the subtask to remove (e.g., "PROJ-456")' 
+		.option('-i, --id <id>', () =>
+			JiraClient.isJiraEnabled()
+				? 'Jira issue key of the subtask to remove (e.g., "PROJ-456")'
 				: 'Subtask ID(s) to remove in format "parentId.subtaskId" (can be comma-separated for multiple subtasks)'
 		)
-		.option(
-			'-c, --convert',
-			() => JiraClient.isJiraEnabled() 
-				? 'Convert the subtask to a standalone issue instead of deleting it' 
+		.option('-c, --convert', () =>
+			JiraClient.isJiraEnabled()
+				? 'Convert the subtask to a standalone issue instead of deleting it'
 				: 'Convert the subtask to a standalone task instead of deleting it'
 		)
 		.option('--skip-generate', 'Skip regenerating task files')
 		.action(async (options) => {
 			const isJiraEnabled = JiraClient.isJiraEnabled();
-			
+
 			if (isJiraEnabled) {
 				// Jira mode
 				const subtaskKey = options.id;
 				const convertToTask = options.convert || false;
-				
+
 				if (!subtaskKey) {
-					console.error(chalk.red('Error: --id parameter is required. Please provide a subtask issue key.'));
+					console.error(
+						chalk.red(
+							'Error: --id parameter is required. Please provide a subtask issue key.'
+						)
+					);
 					showRemoveSubtaskHelp();
 					process.exit(1);
 				}
-				
+
 				try {
 					// Import the removeJiraSubtaskDirect function
-					const { removeJiraSubtaskDirect } = await import('../../mcp-server/src/core/direct-functions/remove-subtask.js');
-					
+					const { removeJiraSubtaskDirect } = await import(
+						'../../mcp-server/src/core/direct-functions/remove-subtask.js'
+					);
+
 					console.log(chalk.blue(`Removing Jira subtask ${subtaskKey}...`));
 					if (convertToTask) {
-						console.log(chalk.blue('The subtask will be converted to a standalone issue'));
+						console.log(
+							chalk.blue('The subtask will be converted to a standalone issue')
+						);
 					}
-					
+
 					// Call the Jira implementation
 					const result = await removeJiraSubtaskDirect(
 						{
@@ -3046,19 +3317,23 @@ function registerCommands(programInstance) {
 						},
 						{ session: process.env }
 					);
-					
+
 					if (!result.success) {
 						console.error(chalk.red(`Error: ${result.error.message}`));
 						process.exit(1);
 					}
-					
+
 					if (convertToTask && result.data.convertedKey) {
 						// Display success message and next steps for converted task
 						console.log(
 							boxen(
-								chalk.white.bold(`Subtask ${subtaskKey} Converted to Issue ${result.data.convertedKey}`) +
+								chalk.white.bold(
+									`Subtask ${subtaskKey} Converted to Issue ${result.data.convertedKey}`
+								) +
 									'\n\n' +
-									chalk.white(`Title: ${result.data.title || 'Unknown title'}`) +
+									chalk.white(
+										`Title: ${result.data.title || 'Unknown title'}`
+									) +
 									'\n\n' +
 									chalk.white.bold('Next Steps:') +
 									'\n' +
@@ -3094,7 +3369,9 @@ function registerCommands(programInstance) {
 						);
 					}
 				} catch (error) {
-					console.error(chalk.red(`Error removing Jira subtask: ${error.message}`));
+					console.error(
+						chalk.red(`Error removing Jira subtask: ${error.message}`)
+					);
 					if (getDebugFlag()) {
 						console.error(error);
 					}
@@ -3157,7 +3434,9 @@ function registerCommands(programInstance) {
 										'\n\n' +
 										chalk.white(`Title: ${result.title}`) +
 										'\n' +
-										chalk.white(`Status: ${getStatusWithColor(result.status)}`) +
+										chalk.white(
+											`Status: ${getStatusWithColor(result.status)}`
+										) +
 										'\n' +
 										chalk.white(
 											`Dependencies: ${result.dependencies.join(', ')}`
@@ -3213,10 +3492,12 @@ function registerCommands(programInstance) {
 	// Helper function to show remove-subtask command help
 	function showRemoveSubtaskHelp() {
 		const isJiraEnabled = JiraClient.isJiraEnabled();
-		
+
 		console.log(
 			boxen(
-				chalk.white.bold(`Remove ${isJiraEnabled ? 'Jira ' : ''}Subtask Command Help`) +
+				chalk.white.bold(
+					`Remove ${isJiraEnabled ? 'Jira ' : ''}Subtask Command Help`
+				) +
 					'\n\n' +
 					chalk.cyan('Usage:') +
 					'\n' +
@@ -3225,17 +3506,21 @@ function registerCommands(programInstance) {
 					'\n' +
 					`  -i, --id <${isJiraEnabled ? 'key' : 'id'}>       ${isJiraEnabled ? 'Jira subtask issue key' : 'Subtask ID(s) to remove in format "parentId.subtaskId" (can be comma-separated)'} (required)\n` +
 					`  -c, --convert       Convert the subtask to a standalone ${isJiraEnabled ? 'issue' : 'task'} instead of deleting it\n` +
-					(isJiraEnabled ? '' : '  -f, --file <file>   Path to the tasks file (default: "tasks/tasks.json")\n') +
-					(isJiraEnabled ? '' : '  --skip-generate     Skip regenerating task files\n') +
+					(isJiraEnabled
+						? ''
+						: '  -f, --file <file>   Path to the tasks file (default: "tasks/tasks.json")\n') +
+					(isJiraEnabled
+						? ''
+						: '  --skip-generate     Skip regenerating task files\n') +
 					'\n' +
 					chalk.cyan('Examples:') +
 					'\n' +
-					(isJiraEnabled ?
-						'  task-master remove-subtask --id=PROJ-456\n' +
-						'  task-master remove-subtask --id=PROJ-456 --convert' :
-						'  task-master remove-subtask --id=5.2\n' +
-						'  task-master remove-subtask --id=5.2,6.3,7.1\n' +
-						'  task-master remove-subtask --id=5.2 --convert'),
+					(isJiraEnabled
+						? '  task-master remove-subtask --id=PROJ-456\n' +
+							'  task-master remove-subtask --id=PROJ-456 --convert'
+						: '  task-master remove-subtask --id=5.2\n' +
+							'  task-master remove-subtask --id=5.2,6.3,7.1\n' +
+							'  task-master remove-subtask --id=5.2 --convert'),
 				{ padding: 1, borderColor: 'blue', borderStyle: 'round' }
 			)
 		);
@@ -3244,49 +3529,62 @@ function registerCommands(programInstance) {
 	// remove-task command
 	programInstance
 		.command('remove-task')
-		.description(() => JiraClient.isJiraEnabled() 
-			? 'Remove a Jira issue from the project' 
-			: 'Remove one or more tasks or subtasks permanently')
-		.option(
-			'-i, --id <id>',
-			() => JiraClient.isJiraEnabled() 
-				? 'Jira issue key(s) to remove (e.g., "PROJ-123" or "PROJ-123,PROJ-124")' 
+		.description(() =>
+			JiraClient.isJiraEnabled()
+				? 'Remove a Jira issue from the project'
+				: 'Remove one or more tasks or subtasks permanently'
+		)
+		.option('-i, --id <id>', () =>
+			JiraClient.isJiraEnabled()
+				? 'Jira issue key(s) to remove (e.g., "PROJ-123" or "PROJ-123,PROJ-124")'
 				: 'ID(s) of the task(s) or subtask(s) to remove (e.g., "5" or "5.2" or "5,6,7")'
 		)
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
 		.option('-y, --yes', 'Skip confirmation prompt', false)
 		.action(async (options) => {
 			const isJiraEnabled = JiraClient.isJiraEnabled();
-			
+
 			if (isJiraEnabled) {
 				// Jira mode
 				const issueKeys = options.id;
-				
+
 				if (!issueKeys) {
-					console.error(chalk.red('Error: --id parameter is required. Please provide one or more Jira issue keys.'));
-					console.error(chalk.yellow('Usage: task-master remove-task --id=PROJ-123'));
+					console.error(
+						chalk.red(
+							'Error: --id parameter is required. Please provide one or more Jira issue keys.'
+						)
+					);
+					console.error(
+						chalk.yellow('Usage: task-master remove-task --id=PROJ-123')
+					);
 					process.exit(1);
 				}
-				
+
 				try {
 					// Import the removeJiraTaskDirect function
-					const { removeJiraTaskDirect } = await import('../../mcp-server/src/core/direct-functions/remove-task.js');
-					
+					const { removeJiraTaskDirect } = await import(
+						'../../mcp-server/src/core/direct-functions/remove-task.js'
+					);
+
 					// Split by comma to support multiple issue keys
-					const issueKeyArray = issueKeys.split(',').map(key => key.trim());
-					
+					const issueKeyArray = issueKeys.split(',').map((key) => key.trim());
+
 					// Skip confirmation if --yes flag is provided
 					if (!options.yes) {
 						// Display issues to be removed
 						console.log();
-						console.log(chalk.red.bold('⚠️ WARNING: This will permanently delete the following Jira issues:'));
+						console.log(
+							chalk.red.bold(
+								'⚠️ WARNING: This will permanently delete the following Jira issues:'
+							)
+						);
 						console.log();
-						
+
 						for (const key of issueKeyArray) {
 							console.log(chalk.white.bold(`Issue: ${key}`));
 						}
 						console.log();
-						
+
 						// Prompt for confirmation
 						const { confirm } = await inquirer.prompt([
 							{
@@ -3298,15 +3596,15 @@ function registerCommands(programInstance) {
 								default: false
 							}
 						]);
-						
+
 						if (!confirm) {
 							console.log(chalk.blue('Issue deletion cancelled.'));
 							process.exit(0);
 						}
 					}
-					
+
 					const indicator = startLoadingIndicator('Removing Jira issues...');
-					
+
 					// Call the Jira implementation
 					const result = await removeJiraTaskDirect(
 						{
@@ -3319,14 +3617,14 @@ function registerCommands(programInstance) {
 						},
 						{ session: process.env }
 					);
-					
+
 					stopLoadingIndicator(indicator);
-					
+
 					if (result.success) {
 						const results = result.data.results || [];
-						const successfulRemovals = results.filter(r => r.success);
-						const failedRemovals = results.filter(r => !r.success);
-						
+						const successfulRemovals = results.filter((r) => r.success);
+						const failedRemovals = results.filter((r) => !r.success);
+
 						if (successfulRemovals.length > 0) {
 							console.log(
 								boxen(
@@ -3335,7 +3633,7 @@ function registerCommands(programInstance) {
 									) +
 										'\n\n' +
 										successfulRemovals
-											.map(r => chalk.white(`✓ ${r.key}`))
+											.map((r) => chalk.white(`✓ ${r.key}`))
 											.join('\n'),
 									{
 										padding: 1,
@@ -3346,7 +3644,7 @@ function registerCommands(programInstance) {
 								)
 							);
 						}
-						
+
 						if (failedRemovals.length > 0) {
 							console.log(
 								boxen(
@@ -3355,7 +3653,7 @@ function registerCommands(programInstance) {
 									) +
 										'\n\n' +
 										failedRemovals
-											.map(r => chalk.white(`✗ ${r.key}: ${r.error}`))
+											.map((r) => chalk.white(`✗ ${r.key}: ${r.error}`))
 											.join('\n'),
 									{
 										padding: 1,
@@ -3365,7 +3663,7 @@ function registerCommands(programInstance) {
 									}
 								)
 							);
-							
+
 							// Exit with error if any removals failed
 							if (successfulRemovals.length === 0) {
 								process.exit(1);
@@ -3376,7 +3674,9 @@ function registerCommands(programInstance) {
 						process.exit(1);
 					}
 				} catch (error) {
-					console.error(chalk.red(`Error removing Jira issues: ${error.message}`));
+					console.error(
+						chalk.red(`Error removing Jira issues: ${error.message}`)
+					);
 					if (getDebugFlag()) {
 						console.error(error);
 					}
@@ -3438,7 +3738,9 @@ function registerCommands(programInstance) {
 							if (typeof taskId === 'string' && taskId.includes('.')) {
 								// It's a subtask
 								const [parentId, subtaskId] = taskId.split('.');
-								console.log(chalk.white.bold(`Subtask ${taskId}: ${task.title}`));
+								console.log(
+									chalk.white.bold(`Subtask ${taskId}: ${task.title}`)
+								);
 								console.log(
 									chalk.gray(
 										`Parent Task: ${task.parentTask.id} - ${task.parentTask.title}`

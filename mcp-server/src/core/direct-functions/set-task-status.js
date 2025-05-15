@@ -164,7 +164,9 @@ export async function setJiraTaskStatusDirect(args, log) {
 		enableSilentMode(); // Enable silent mode before calling core function
 		try {
 			// Call the core function
-			const result = await setJiraTaskStatus(taskId, newStatus, { mcpLog: log });
+			const result = await setJiraTaskStatus(taskId, newStatus, {
+				mcpLog: log
+			});
 
 			log.info(`Successfully set task ${taskId} status to ${newStatus}`);
 

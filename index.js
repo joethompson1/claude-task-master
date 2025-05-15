@@ -113,7 +113,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 		.command('list')
 		.description('List all tasks')
 		.option('-f, --file <file>', 'Path to the tasks file', 'tasks/tasks.json')
-		.option('--parent-key <key>', 'Parent Jira issue key (required if source is jira)')
+		.option(
+			'--parent-key <key>',
+			'Parent Jira issue key (required if source is jira)'
+		)
 		.option('-s, --status <status>', 'Filter by status')
 		.option('--with-subtasks', 'Show subtasks for each task')
 		.action(() => {

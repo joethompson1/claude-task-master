@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { setTaskStatusDirect, setJiraTaskStatusDirect } from '../core/task-master-core.js';
+import {
+	setTaskStatusDirect,
+	setJiraTaskStatusDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -41,7 +44,7 @@ export function registerSetTaskStatusTool(server) {
 			execute: withNormalizedProjectRoot(async (args, { log }) => {
 				try {
 					log.info(`Setting status of task(s) ${args.id} to: ${args.status}`);
-	
+
 					// Use args.projectRoot directly (guaranteed by withNormalizedProjectRoot)
 					let tasksJsonPath;
 					try {
@@ -55,7 +58,7 @@ export function registerSetTaskStatusTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					const result = await setTaskStatusDirect(
 						{
 							tasksJsonPath: tasksJsonPath,
@@ -64,7 +67,7 @@ export function registerSetTaskStatusTool(server) {
 						},
 						log
 					);
-	
+
 					if (result.success) {
 						log.info(
 							`Successfully updated status for task(s) ${args.id} to "${args.status}": ${result.data.message}`
@@ -74,7 +77,7 @@ export function registerSetTaskStatusTool(server) {
 							`Failed to update task status: ${result.error?.message || 'Unknown error'}`
 						);
 					}
-	
+
 					return handleApiResult(result, log, 'Error setting task status');
 				} catch (error) {
 					log.error(`Error in setTaskStatus tool: ${error.message}`);
@@ -98,11 +101,13 @@ export function registerSetTaskStatusTool(server) {
 					.string()
 					.describe(
 						"New status to set (e.g., 'To Do', 'In Progress', 'Done', 'In Review' etc)."
-					),
+					)
 			}),
 			execute: async (args, { log, session }) => {
 				try {
-					log.info(`Setting status of Jira issue(s) ${args.id} to: ${args.status}`);
+					log.info(
+						`Setting status of Jira issue(s) ${args.id} to: ${args.status}`
+					);
 
 					// Call the direct function for Jira status updates
 					const result = await setJiraTaskStatusDirect(
@@ -125,7 +130,11 @@ export function registerSetTaskStatusTool(server) {
 					}
 
 					// Format and return the result
-					return handleApiResult(result, log, 'Error setting Jira issue status');
+					return handleApiResult(
+						result,
+						log,
+						'Error setting Jira issue status'
+					);
 				} catch (error) {
 					log.error(`Error in setJiraTaskStatus tool: ${error.message}`);
 					return createErrorResponse(

@@ -174,8 +174,6 @@ export async function updateSubtaskByIdDirect(args, log, context = {}) {
 	}
 }
 
-
-
 /**
  * Direct function wrapper for updateSubtaskById with error handling.
  *

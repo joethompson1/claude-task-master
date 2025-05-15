@@ -10,7 +10,10 @@ import {
 	withNormalizedProjectRoot
 } from './utils.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
-import { clearSubtasksDirect, clearJiraSubtasksDirect } from '../core/task-master-core.js';
+import {
+	clearSubtasksDirect,
+	clearJiraSubtasksDirect
+} from '../core/task-master-core.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
 /**
@@ -46,7 +49,7 @@ export function registerClearSubtasksTool(server) {
 			execute: withNormalizedProjectRoot(async (args, { log, session }) => {
 				try {
 					log.info(`Clearing subtasks with args: ${JSON.stringify(args)}`);
-	
+
 					// Use args.projectRoot directly (guaranteed by withNormalizedProjectRoot)
 					let tasksJsonPath;
 					try {
@@ -60,7 +63,7 @@ export function registerClearSubtasksTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					const result = await clearSubtasksDirect(
 						{
 							tasksJsonPath: tasksJsonPath,
@@ -69,13 +72,13 @@ export function registerClearSubtasksTool(server) {
 						},
 						log
 					);
-	
+
 					if (result.success) {
 						log.info(`Subtasks cleared successfully: ${result.data.message}`);
 					} else {
 						log.error(`Failed to clear subtasks: ${result.error.message}`);
 					}
-	
+
 					return handleApiResult(result, log, 'Error clearing subtasks');
 				} catch (error) {
 					log.error(`Error in clearSubtasks tool: ${error.message}`);
@@ -92,7 +95,7 @@ export function registerClearSubtasksTool(server) {
 					parentKey: z
 						.string()
 						.optional()
-						.describe('Parent Jira issue key to clear subtasks from'),
+						.describe('Parent Jira issue key to clear subtasks from')
 				})
 				.refine((data) => data.parentKey, {
 					message: "Either 'parentKey' parameter must be provided",
@@ -112,7 +115,9 @@ export function registerClearSubtasksTool(server) {
 					);
 
 					if (result.success) {
-						log.info(`Jira subtasks cleared successfully: ${result.data.message}`);
+						log.info(
+							`Jira subtasks cleared successfully: ${result.data.message}`
+						);
 					} else {
 						log.error(`Failed to clear Jira subtasks: ${result.error.message}`);
 					}

@@ -70,7 +70,7 @@ export function registerAddTaskTool(server) {
 			execute: withNormalizedProjectRoot(async (args, { log, session }) => {
 				try {
 					log.info(`Starting add-task with args: ${JSON.stringify(args)}`);
-	
+
 					// Use args.projectRoot directly (guaranteed by withNormalizedProjectRoot)
 					let tasksJsonPath;
 					try {
@@ -84,7 +84,7 @@ export function registerAddTaskTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					// Call the direct functionP
 					const result = await addTaskDirect(
 						{
@@ -102,7 +102,7 @@ export function registerAddTaskTool(server) {
 						log,
 						{ session }
 					);
-	
+
 					return handleApiResult(result, log);
 				} catch (error) {
 					log.error(`Error in add-task tool: ${error.message}`);
@@ -113,32 +113,72 @@ export function registerAddTaskTool(server) {
 	} else {
 		server.addTool({
 			name: 'add_jira_issue',
-			description: 'Creates a new issue in Jira, optionally linking it to an Parent',
+			description:
+				'Creates a new issue in Jira, optionally linking it to an Parent',
 			parameters: z.object({
-				title: z.string().describe("The title/summary for the new issue"),
-				description: z.string().optional().describe("The description for the issue"),
-				issueType: z.string().optional().describe("The issue type for the issue (default: Task, Epic, Story, Bug, Subtask)"),
-				details: z.string().optional().describe("The implementation details for the issue"),
-				acceptanceCriteria: z.string().optional().describe("The acceptance criteria for the issue"),
-				testStrategy: z.string().optional().describe("The test strategy for the issue"),
-				parentKey: z.string().optional().describe("The Jira key of the Epic/parent to link this issue to (e.g., 'PROJ-5')"),
-				priority: z.string().optional().describe("Jira priority name (e.g., 'Medium', 'High')"),
-				assignee: z.string().optional().describe("Jira account ID or email of the assignee"),
-				labels: z.array(z.string()).optional().describe("List of labels to add"),
-				projectRoot: z.string().optional().describe("Root directory of the project (typically derived from session)")
+				title: z.string().describe('The title/summary for the new issue'),
+				description: z
+					.string()
+					.optional()
+					.describe('The description for the issue'),
+				issueType: z
+					.string()
+					.optional()
+					.describe(
+						'The issue type for the issue (default: Task, Epic, Story, Bug, Subtask)'
+					),
+				details: z
+					.string()
+					.optional()
+					.describe('The implementation details for the issue'),
+				acceptanceCriteria: z
+					.string()
+					.optional()
+					.describe('The acceptance criteria for the issue'),
+				testStrategy: z
+					.string()
+					.optional()
+					.describe('The test strategy for the issue'),
+				parentKey: z
+					.string()
+					.optional()
+					.describe(
+						"The Jira key of the Epic/parent to link this issue to (e.g., 'PROJ-5')"
+					),
+				priority: z
+					.string()
+					.optional()
+					.describe("Jira priority name (e.g., 'Medium', 'High')"),
+				assignee: z
+					.string()
+					.optional()
+					.describe('Jira account ID or email of the assignee'),
+				labels: z
+					.array(z.string())
+					.optional()
+					.describe('List of labels to add'),
+				projectRoot: z
+					.string()
+					.optional()
+					.describe(
+						'Root directory of the project (typically derived from session)'
+					)
 			}),
-			
+
 			execute: async (args, { log, session }) => {
 				try {
 					log.info(`Starting addJiraTask with args: ${JSON.stringify(args)}`);
-					
+
 					// Get project root from args or session
-					const rootFolder = args.projectRoot || getProjectRootFromSession(session, log);
-					
+					const rootFolder =
+						args.projectRoot || getProjectRootFromSession(session, log);
+
 					// Even though Jira functions don't actually need the project root,
 					// we follow the standard pattern for consistency
-					log.info(`Project root: ${rootFolder || 'Not determined, using session context'}`);
-					
+					log.info(
+						`Project root: ${rootFolder || 'Not determined, using session context'}`
+					);
+
 					try {
 						// Call the direct function
 						const result = await addJiraTaskDirect(
@@ -158,17 +198,19 @@ export function registerAddTaskTool(server) {
 							log,
 							{ session }
 						);
-						
+
 						// Log the full result for debugging
-						log.info(`Full result from addJiraTaskDirect: ${JSON.stringify(result)}`);
-						
+						log.info(
+							`Full result from addJiraTaskDirect: ${JSON.stringify(result)}`
+						);
+
 						// Return the formatted result
 						return handleApiResult(result, log);
 					} catch (innerError) {
 						// Catch and log any direct error from the function call itself
 						log.error(`Direct function execution error: ${innerError.message}`);
 						log.error(`Error stack: ${innerError.stack}`);
-						
+
 						// Return a detailed error response
 						return createErrorResponse({
 							message: `Direct error in addJiraTask: ${innerError.message}`,
@@ -179,27 +221,35 @@ export function registerAddTaskTool(server) {
 				} catch (error) {
 					// Log the full error object for debugging
 					log.error(`Error in addJiraTask tool: ${error.message}`);
-					log.error(`Error details: ${JSON.stringify({
-						name: error.name,
-						message: error.message,
-						stack: error.stack,
-						response: error.response ? {
-							status: error.response.status,
-							statusText: error.response.statusText,
-							data: error.response.data
-						} : 'No response data',
-						code: error.code
-					})}`);
-					
+					log.error(
+						`Error details: ${JSON.stringify({
+							name: error.name,
+							message: error.message,
+							stack: error.stack,
+							response: error.response
+								? {
+										status: error.response.status,
+										statusText: error.response.statusText,
+										data: error.response.data
+									}
+								: 'No response data',
+							code: error.code
+						})}`
+					);
+
 					// Create a comprehensive error response
 					return createErrorResponse({
 						message: error.message,
 						details: error.stack,
 						displayMessage: `Jira API Error: ${error.message}${
-							error.response ? ` (Status: ${error.response.status} ${error.response.statusText})` : ''
-							}${
-								error.response?.data?.errorMessages ? ` - ${error.response.data.errorMessages.join(', ')}` : ''
-							}`
+							error.response
+								? ` (Status: ${error.response.status} ${error.response.statusText})`
+								: ''
+						}${
+							error.response?.data?.errorMessages
+								? ` - ${error.response.data.errorMessages.join(', ')}`
+								: ''
+						}`
 					});
 				}
 			}

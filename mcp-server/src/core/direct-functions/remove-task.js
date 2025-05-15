@@ -180,7 +180,7 @@ export async function removeTaskDirect(args, log) {
 export async function removeJiraTaskDirect(args, log) {
 	// Destructure expected args
 	const { id } = args;
-	
+
 	try {
 		// Validate task ID parameter
 		if (!id) {
@@ -226,7 +226,9 @@ export async function removeJiraTaskDirect(args, log) {
 							success: false,
 							error: result.error.message
 						});
-						log.error(`Error removing Jira issue ${taskId}: ${result.error.message}`);
+						log.error(
+							`Error removing Jira issue ${taskId}: ${result.error.message}`
+						);
 					}
 				} catch (error) {
 					results.push({

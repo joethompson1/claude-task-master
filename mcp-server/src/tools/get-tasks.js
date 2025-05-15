@@ -47,7 +47,7 @@ export function registerListTasksTool(server) {
 			execute: withNormalizedProjectRoot(async (args, { log, session }) => {
 				try {
 					log.info(`Getting tasks with filters: ${JSON.stringify(args)}`);
-	
+
 					// Use args.projectRoot directly (guaranteed by withNormalizedProjectRoot)
 					let tasksJsonPath;
 					try {
@@ -61,7 +61,7 @@ export function registerListTasksTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					const result = await listTasksDirect(
 						{
 							tasksJsonPath: tasksJsonPath,
@@ -70,7 +70,7 @@ export function registerListTasksTool(server) {
 						},
 						log
 					);
-	
+
 					log.info(
 						`Retrieved ${result.success ? result.data?.tasks?.length || 0 : 0} tasks${result.fromCache ? ' (from cache)' : ''}`
 					);
@@ -101,7 +101,7 @@ export function registerListTasksTool(server) {
 				parentKey: z
 					.string()
 					.optional()
-					.describe('Parent Jira issue key, leave blank to get all tasks'),
+					.describe('Parent Jira issue key, leave blank to get all tasks')
 			}),
 			execute: async (args, { log, session }) => {
 				try {

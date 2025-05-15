@@ -146,23 +146,28 @@ export async function expandAllJiraTasksDirect(args, log, context = {}) {
 			}
 
 			// Fetch all relevant tasks from Jira
-			log.info(`Fetching tasks from Jira ${parentKey ? `for parent ${parentKey}` : ''}`);
+			log.info(
+				`Fetching tasks from Jira ${parentKey ? `for parent ${parentKey}` : ''}`
+			);
 			const tasksResult = await fetchTasksFromJira(parentKey, true, log);
-			
+
 			if (!tasksResult.success) {
 				return {
 					success: false,
 					error: {
 						code: 'JIRA_FETCH_ERROR',
-						message: tasksResult.error?.message || 'Failed to fetch tasks from Jira'
+						message:
+							tasksResult.error?.message || 'Failed to fetch tasks from Jira'
 					}
 				};
 			}
 
 			// Filter for pending tasks without subtasks (or with subtasks if force is true)
-			const eligibleTasks = tasksResult.tasks.filter(task => {
+			const eligibleTasks = tasksResult.tasks.filter((task) => {
 				// Only consider pending or in-progress tasks
-				const hasValidStatus = ['pending', 'in-progress'].includes(task.status?.toLowerCase() || 'pending');
+				const hasValidStatus = ['pending', 'in-progress'].includes(
+					task.status?.toLowerCase() || 'pending'
+				);
 				// Check for existing subtasks
 				const hasSubtasks = task.subtasks && task.subtasks.length > 0;
 				// Task is eligible if:
@@ -171,7 +176,9 @@ export async function expandAllJiraTasksDirect(args, log, context = {}) {
 				return hasValidStatus && (!hasSubtasks || forceFlag);
 			});
 
-			log.info(`Found ${eligibleTasks.length} eligible tasks to expand out of ${tasksResult.tasks.length} total tasks`);
+			log.info(
+				`Found ${eligibleTasks.length} eligible tasks to expand out of ${tasksResult.tasks.length} total tasks`
+			);
 
 			if (eligibleTasks.length === 0) {
 				return {
@@ -208,7 +215,7 @@ export async function expandAllJiraTasksDirect(args, log, context = {}) {
 			for (const task of eligibleTasks) {
 				try {
 					log.info(`Expanding task: ${task.id} - ${task.title}`);
-					
+
 					// Call expandJiraTask with suitable options
 					const expandResult = await expandJiraTask(
 						task.id,

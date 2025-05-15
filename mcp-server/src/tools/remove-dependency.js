@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { removeDependencyDirect, removeJiraDependencyDirect } from '../core/task-master-core.js';
+import {
+	removeDependencyDirect,
+	removeJiraDependencyDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -40,7 +43,7 @@ export function registerRemoveDependencyTool(server) {
 					log.info(
 						`Removing dependency for task ${args.id} from ${args.dependsOn} with args: ${JSON.stringify(args)}`
 					);
-	
+
 					// Use args.projectRoot directly (guaranteed by withNormalizedProjectRoot)
 					let tasksJsonPath;
 					try {
@@ -54,7 +57,7 @@ export function registerRemoveDependencyTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					const result = await removeDependencyDirect(
 						{
 							tasksJsonPath: tasksJsonPath,
@@ -63,13 +66,13 @@ export function registerRemoveDependencyTool(server) {
 						},
 						log
 					);
-	
+
 					if (result.success) {
 						log.info(`Successfully removed dependency: ${result.data.message}`);
 					} else {
 						log.error(`Failed to remove dependency: ${result.error.message}`);
 					}
-	
+
 					return handleApiResult(result, log, 'Error removing dependency');
 				} catch (error) {
 					log.error(`Error in removeDependency tool: ${error.message}`);
@@ -82,8 +85,14 @@ export function registerRemoveDependencyTool(server) {
 			name: 'remove_jira_dependency',
 			description: 'Remove a dependency from a Jira issue',
 			parameters: z.object({
-				id: z.string().describe('Jira issue key to remove dependency from (e.g., PROJ-123)'),
-				dependsOn: z.string().describe('Jira issue key to remove as a dependency (e.g., PROJ-456)')
+				id: z
+					.string()
+					.describe(
+						'Jira issue key to remove dependency from (e.g., PROJ-123)'
+					),
+				dependsOn: z
+					.string()
+					.describe('Jira issue key to remove as a dependency (e.g., PROJ-456)')
 			}),
 			execute: async (args, { log, session }) => {
 				try {
@@ -101,9 +110,13 @@ export function registerRemoveDependencyTool(server) {
 					);
 
 					if (result.success) {
-						log.info(`Successfully removed Jira dependency: ${result.data.message}`);
+						log.info(
+							`Successfully removed Jira dependency: ${result.data.message}`
+						);
 					} else {
-						log.error(`Failed to remove Jira dependency: ${result.error.message}`);
+						log.error(
+							`Failed to remove Jira dependency: ${result.error.message}`
+						);
 					}
 
 					return handleApiResult(result, log, 'Error removing Jira dependency');

@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { removeSubtaskDirect, removeJiraSubtaskDirect } from '../core/task-master-core.js';
+import {
+	removeSubtaskDirect,
+	removeJiraSubtaskDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -51,7 +54,7 @@ export function registerRemoveSubtaskTool(server) {
 			execute: withNormalizedProjectRoot(async (args, { log }) => {
 				try {
 					log.info(`Removing subtask with args: ${JSON.stringify(args)}`);
-	
+
 					// Use args.projectRoot directly (guaranteed by withNormalizedProjectRoot)
 					let tasksJsonPath;
 					try {
@@ -65,7 +68,7 @@ export function registerRemoveSubtaskTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					const result = await removeSubtaskDirect(
 						{
 							tasksJsonPath: tasksJsonPath,
@@ -75,13 +78,13 @@ export function registerRemoveSubtaskTool(server) {
 						},
 						log
 					);
-	
+
 					if (result.success) {
 						log.info(`Subtask removed successfully: ${result.data.message}`);
 					} else {
 						log.error(`Failed to remove subtask: ${result.error.message}`);
 					}
-	
+
 					return handleApiResult(result, log, 'Error removing subtask');
 				} catch (error) {
 					log.error(`Error in removeSubtask tool: ${error.message}`);
@@ -104,26 +107,26 @@ export function registerRemoveSubtaskTool(server) {
 					.optional()
 					.describe(
 						'Convert the subtask to a standalone task instead of deleting it'
-					),
+					)
 			}),
 			execute: async (args, { log, session }) => {
 				try {
 					log.info(`Removing subtask with args: ${JSON.stringify(args)}`);
-	
+
 					const result = await removeJiraSubtaskDirect(
 						{
 							id: args.id,
-							convert: args.convert,
+							convert: args.convert
 						},
 						log
 					);
-	
+
 					if (result.success) {
 						log.info(`Subtask removed successfully: ${result.data.message}`);
 					} else {
 						log.error(`Failed to remove subtask: ${result.error.message}`);
 					}
-	
+
 					return handleApiResult(result, log, 'Error removing subtask');
 				} catch (error) {
 					log.error(`Error in removeSubtask tool: ${error.message}`);

@@ -140,7 +140,8 @@ export async function updateJiraTasksDirect(args, log, context = {}) {
 
 		// Check required parameters
 		if (!taskIds || !Array.isArray(taskIds) || taskIds.length === 0) {
-			const errorMessage = 'No task IDs specified. Please provide an array of Jira task IDs to update.';
+			const errorMessage =
+				'No task IDs specified. Please provide an array of Jira task IDs to update.';
 			log.error(errorMessage);
 			return {
 				success: false,
@@ -150,7 +151,8 @@ export async function updateJiraTasksDirect(args, log, context = {}) {
 		}
 
 		if (!prompt) {
-			const errorMessage = 'No prompt specified. Please provide a prompt with new context for task updates.';
+			const errorMessage =
+				'No prompt specified. Please provide a prompt with new context for task updates.';
 			log.error(errorMessage);
 			return {
 				success: false,
@@ -190,10 +192,12 @@ export async function updateJiraTasksDirect(args, log, context = {}) {
 			return {
 				success: true,
 				data: {
-					message: result.message || `Successfully updated Jira tasks based on the prompt`,
+					message:
+						result.message ||
+						`Successfully updated Jira tasks based on the prompt`,
 					taskIds,
 					updateCount: result.results?.length || 0,
-					successCount: result.results?.filter(r => r.success).length || 0,
+					successCount: result.results?.filter((r) => r.success).length || 0,
 					results: result.results || [],
 					useResearch
 				},

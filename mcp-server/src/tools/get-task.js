@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { showTaskDirect, showJiraTaskDirect } from '../core/task-master-core.js';
+import {
+	showTaskDirect,
+	showJiraTaskDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -61,12 +64,12 @@ export function registerShowTaskTool(server) {
 			}),
 			execute: withNormalizedProjectRoot(async (args, { log }) => {
 				const { id, file, status, projectRoot } = args;
-	
+
 				try {
 					log.info(
 						`Getting task details for ID: ${id}${status ? ` (filtering subtasks by status: ${status})` : ''} in root: ${projectRoot}`
 					);
-	
+
 					// Resolve the path to tasks.json using the NORMALIZED projectRoot from args
 					let tasksJsonPath;
 					try {
@@ -81,7 +84,7 @@ export function registerShowTaskTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					// Call the direct function, passing the normalized projectRoot
 					const result = await showTaskDirect(
 						{
@@ -92,7 +95,7 @@ export function registerShowTaskTool(server) {
 						},
 						log
 					);
-	
+
 					if (result.success) {
 						log.info(
 							`Successfully retrieved task details for ID: ${args.id}${result.fromCache ? ' (from cache)' : ''}`
@@ -100,7 +103,7 @@ export function registerShowTaskTool(server) {
 					} else {
 						log.error(`Failed to get task: ${result.error.message}`);
 					}
-	
+
 					// Use our custom processor function
 					return handleApiResult(
 						result,
@@ -119,7 +122,11 @@ export function registerShowTaskTool(server) {
 			name: 'get_jira_task',
 			description: 'Get detailed information about a specific Jira task',
 			parameters: z.object({
-				id: z.string().describe('Task ID to get (Important: Make sure to include the project prefix, e.g. PROJ-123)'),
+				id: z
+					.string()
+					.describe(
+						'Task ID to get (Important: Make sure to include the project prefix, e.g. PROJ-123)'
+					),
 				withSubtasks: z
 					.boolean()
 					.optional()
@@ -160,8 +167,12 @@ export function registerShowTaskTool(server) {
 						processTaskResponse
 					);
 				} catch (error) {
-					log.error(`Error in get-jira-task tool: ${error.message}\n${error.stack}`); // Add stack trace
-					return createErrorResponse(`Failed to get Jira task: ${error.message}`);
+					log.error(
+						`Error in get-jira-task tool: ${error.message}\n${error.stack}`
+					); // Add stack trace
+					return createErrorResponse(
+						`Failed to get Jira task: ${error.message}`
+					);
 				}
 			}
 		});

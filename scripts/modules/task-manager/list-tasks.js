@@ -38,7 +38,7 @@ async function listTasks(
 		// Extract options
 		const source = options.source || 'local';
 		const parentKey = options.parentKey;
-		
+
 		// Only display banner for text output
 		if (outputFormat === 'text') {
 			displayBanner();
@@ -46,32 +46,39 @@ async function listTasks(
 
 		let data;
 		let filteredTasks;
-		
+
 		// Handle different data sources
 		if (JiraClient.isJiraEnabled()) {
 			// Import the Jira utilities (use dynamic import to avoid circular dependencies)
-			const jiraUtils = await import('../../../mcp-server/src/core/utils/jira-utils.js');
-			
+			const jiraUtils = await import(
+				'../../../mcp-server/src/core/utils/jira-utils.js'
+			);
+
 			// Fetch subtasks from Jira for the specified parent key
-			const jiraData = await jiraUtils.fetchTasksFromJira(parentKey, withSubtasks, {
-				info: (msg) => log('info', msg),
-				error: (msg) => log('error', msg),
-				warn: (msg) => log('warn', msg),
+			const jiraData = await jiraUtils.fetchTasksFromJira(
+				parentKey,
+				withSubtasks,
+				{
+					info: (msg) => log('info', msg),
+					error: (msg) => log('error', msg),
+					warn: (msg) => log('warn', msg),
 					debug: (msg) => log('debug', msg)
-			});
-			
+				}
+			);
+
 			// Set data and filtered tasks
 			data = jiraData;
-			filteredTasks = statusFilter && statusFilter.toLowerCase() !== 'all'
-				? data.tasks.filter(
-					(task) =>
-						task.status &&
-						task.status.toLowerCase() === statusFilter.toLowerCase()
-				)
-				: data.tasks;
+			filteredTasks =
+				statusFilter && statusFilter.toLowerCase() !== 'all'
+					? data.tasks.filter(
+							(task) =>
+								task.status &&
+								task.status.toLowerCase() === statusFilter.toLowerCase()
+						)
+					: data.tasks;
 		} else {
 			// Original local file reading logic
-			data = readJSON(tasksPath); 
+			data = readJSON(tasksPath);
 			if (!data || !data.tasks) {
 				throw new Error(`No valid tasks found in ${tasksPath}`);
 			}

@@ -23,7 +23,9 @@ export async function listTasksDirect(args, log) {
 	const { tasksJsonPath, status, withSubtasks, parentKey } = args;
 
 	if (!JiraClient.isJiraEnabled() && !tasksJsonPath) {
-		log.error('listTasksDirect called without tasksJsonPath and source is not jira');
+		log.error(
+			'listTasksDirect called without tasksJsonPath and source is not jira'
+		);
 		return {
 			success: false,
 			error: {
@@ -37,7 +39,7 @@ export async function listTasksDirect(args, log) {
 	// Use the explicit tasksJsonPath for cache key (or parentKey for Jira)
 	const statusFilter = status || 'all';
 	const withSubtasksFilter = withSubtasks || false;
-	const cacheKey = JiraClient.isJiraEnabled() 
+	const cacheKey = JiraClient.isJiraEnabled()
 		? `listTasks:jira:${parentKey}:${statusFilter}:${withSubtasksFilter}`
 		: `listTasks:${tasksJsonPath}:${statusFilter}:${withSubtasksFilter}`;
 
@@ -52,7 +54,7 @@ export async function listTasksDirect(args, log) {
 					? `Executing core listTasks function for Jira parent: ${parentKey}, filter: ${statusFilter}, subtasks: ${withSubtasksFilter}`
 					: `Executing core listTasks function for path: ${tasksJsonPath}, filter: ${statusFilter}, subtasks: ${withSubtasksFilter}`
 			);
-			
+
 			// Pass the explicit tasksJsonPath and options to the core function
 			const resultData = await listTasks(
 				tasksJsonPath,
@@ -119,4 +121,3 @@ export async function listTasksDirect(args, log) {
 		};
 	}
 }
-

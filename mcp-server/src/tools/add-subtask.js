@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { addSubtaskDirect, addJiraSubtaskDirect } from '../core/task-master-core.js';
+import {
+	addSubtaskDirect,
+	addJiraSubtaskDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -47,7 +50,9 @@ export function registerAddSubtaskTool(server) {
 				dependencies: z
 					.string()
 					.optional()
-					.describe('Comma-separated list of dependency IDs for the new subtask'),
+					.describe(
+						'Comma-separated list of dependency IDs for the new subtask'
+					),
 				file: z
 					.string()
 					.optional()
@@ -65,7 +70,7 @@ export function registerAddSubtaskTool(server) {
 			execute: withNormalizedProjectRoot(async (args, { log, session }) => {
 				try {
 					log.info(`Adding subtask with args: ${JSON.stringify(args)}`);
-	
+
 					// Use args.projectRoot directly (guaranteed by withNormalizedProjectRoot)
 					let tasksJsonPath;
 					try {
@@ -79,7 +84,7 @@ export function registerAddSubtaskTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					const result = await addSubtaskDirect(
 						{
 							tasksJsonPath: tasksJsonPath,
@@ -94,13 +99,13 @@ export function registerAddSubtaskTool(server) {
 						},
 						log
 					);
-	
+
 					if (result.success) {
 						log.info(`Subtask added successfully: ${result.data.message}`);
 					} else {
 						log.error(`Failed to add subtask: ${result.error.message}`);
 					}
-	
+
 					return handleApiResult(result, log, 'Error adding subtask');
 				} catch (error) {
 					log.error(`Error in addSubtask tool: ${error.message}`);
@@ -111,23 +116,46 @@ export function registerAddSubtaskTool(server) {
 	} else {
 		server.addTool({
 			name: 'add_jira_subtask',
-			description: 'Creates a new subtask under a specified parent issue in Jira',
+			description:
+				'Creates a new subtask under a specified parent issue in Jira',
 			parameters: z.object({
-				parentKey: z.string().describe("The Jira key of the parent issue (e.g., 'PROJ-123')"),
-				title: z.string().describe("The title/summary for the new subtask"),
-				description: z.string().optional().describe("The description for the subtask"),
-				details: z.string().optional().describe("The implementation details for the subtask"),
-				acceptanceCriteria: z.string().optional().describe("The acceptance criteria for the subtask"),
-				testStrategy: z.string().optional().describe("The test strategy for the subtask"),
-				priority: z.string().optional().describe("Jira priority name (e.g., 'Medium', 'High')"),
-				assignee: z.string().optional().describe("Jira account ID or email of the assignee"),
-				labels: z.array(z.string()).optional().describe("List of labels to add"),
+				parentKey: z
+					.string()
+					.describe("The Jira key of the parent issue (e.g., 'PROJ-123')"),
+				title: z.string().describe('The title/summary for the new subtask'),
+				description: z
+					.string()
+					.optional()
+					.describe('The description for the subtask'),
+				details: z
+					.string()
+					.optional()
+					.describe('The implementation details for the subtask'),
+				acceptanceCriteria: z
+					.string()
+					.optional()
+					.describe('The acceptance criteria for the subtask'),
+				testStrategy: z
+					.string()
+					.optional()
+					.describe('The test strategy for the subtask'),
+				priority: z
+					.string()
+					.optional()
+					.describe("Jira priority name (e.g., 'Medium', 'High')"),
+				assignee: z
+					.string()
+					.optional()
+					.describe('Jira account ID or email of the assignee'),
+				labels: z.array(z.string()).optional().describe('List of labels to add')
 			}),
-			
+
 			execute: async (args, { log, session }) => {
 				try {
-					log.info(`Starting addJiraSubtask with args: ${JSON.stringify(args)}`);
-					
+					log.info(
+						`Starting addJiraSubtask with args: ${JSON.stringify(args)}`
+					);
+
 					try {
 						// Call the direct function
 						const result = await addJiraSubtaskDirect(
@@ -146,17 +174,19 @@ export function registerAddSubtaskTool(server) {
 							log,
 							{ session }
 						);
-	
+
 						// Log the full result for debugging
-						log.info(`Full result from addJiraSubtaskDirect: ${JSON.stringify(result)}`);
-	
+						log.info(
+							`Full result from addJiraSubtaskDirect: ${JSON.stringify(result)}`
+						);
+
 						// Return the formatted result
 						return handleApiResult(result, log);
 					} catch (innerError) {
 						// Catch and log any direct error from the function call itself
 						log.error(`Direct function execution error: ${innerError.message}`);
 						log.error(`Error stack: ${innerError.stack}`);
-						
+
 						// Return a detailed error response
 						return createErrorResponse({
 							message: `Direct error in addJiraSubtask: ${innerError.message}`,
@@ -167,26 +197,34 @@ export function registerAddSubtaskTool(server) {
 				} catch (error) {
 					// Log the full error object for debugging
 					log.error(`Error in addJiraSubtask tool: ${error.message}`);
-					log.error(`Error details: ${JSON.stringify({
-						name: error.name,
-						message: error.message,
-						stack: error.stack,
-						response: error.response ? {
-							status: error.response.status,
-							statusText: error.response.statusText,
-							data: error.response.data
-						} : 'No response data',
-						code: error.code
-					})}`);
-					
+					log.error(
+						`Error details: ${JSON.stringify({
+							name: error.name,
+							message: error.message,
+							stack: error.stack,
+							response: error.response
+								? {
+										status: error.response.status,
+										statusText: error.response.statusText,
+										data: error.response.data
+									}
+								: 'No response data',
+							code: error.code
+						})}`
+					);
+
 					// Create a comprehensive error response
 					return createErrorResponse({
 						message: error.message,
 						details: error.stack,
 						displayMessage: `Jira API Error: ${error.message}${
-							error.response ? ` (Status: ${error.response.status} ${error.response.statusText})` : ''
+							error.response
+								? ` (Status: ${error.response.status} ${error.response.statusText})`
+								: ''
 						}${
-							error.response?.data?.errorMessages ? ` - ${error.response.data.errorMessages.join(', ')}` : ''
+							error.response?.data?.errorMessages
+								? ` - ${error.response.data.errorMessages.join(', ')}`
+								: ''
 						}`
 					});
 				}

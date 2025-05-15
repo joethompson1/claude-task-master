@@ -1,6 +1,6 @@
 /**
  * jira-client.js
- * 
+ *
  * Class for interacting with Jira API. Encapsulates authentication, requests,
  * and provides methods for Jira operations.
  */
@@ -19,7 +19,7 @@ export class JiraClient {
 	constructor(config) {
 		this.config = config || JiraClient.getJiraConfig();
 		this.enabled = JiraClient.isJiraEnabled();
-		
+
 		if (this.enabled) {
 			try {
 				this.client = this.createJiraClient(this.config);
@@ -41,7 +41,7 @@ export class JiraClient {
 			baseUrl: process.env.JIRA_API_URL,
 			email: process.env.JIRA_EMAIL,
 			apiToken: process.env.JIRA_API_TOKEN,
-			project: process.env.JIRA_PROJECT,
+			project: process.env.JIRA_PROJECT
 		};
 	}
 
@@ -50,8 +50,13 @@ export class JiraClient {
 	 * @returns {boolean} True if Jira environment is configured
 	 */
 	static isJiraEnabled() {
-		const requiredVars = ['JIRA_API_URL', 'JIRA_EMAIL', 'JIRA_API_TOKEN', 'JIRA_PROJECT'];
-		return requiredVars.every(varName => !!process.env[varName]);
+		const requiredVars = [
+			'JIRA_API_URL',
+			'JIRA_EMAIL',
+			'JIRA_API_TOKEN',
+			'JIRA_PROJECT'
+		];
+		return requiredVars.every((varName) => !!process.env[varName]);
 	}
 
 	/**
@@ -61,11 +66,13 @@ export class JiraClient {
 	 */
 	createJiraClient(config) {
 		const { baseUrl, email, apiToken } = config;
-		
+
 		if (!baseUrl || !email || !apiToken) {
-			throw new Error('Missing required Jira API configuration. Please set JIRA_API_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables.');
+			throw new Error(
+				'Missing required Jira API configuration. Please set JIRA_API_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables.'
+			);
 		}
-		
+
 		return axios.create({
 			baseURL: baseUrl,
 			auth: {
@@ -74,7 +81,7 @@ export class JiraClient {
 			},
 			headers: {
 				'Content-Type': 'application/json',
-				'Accept': 'application/json'
+				Accept: 'application/json'
 			}
 		});
 	}
@@ -89,46 +96,56 @@ export class JiraClient {
 			success: true,
 			missingFields: []
 		};
-		
+
 		// Check required fields
 		if (!this.config.baseUrl) {
 			result.success = false;
 			result.missingFields.push('baseUrl');
 		}
-		
+
 		if (!this.config.email) {
 			result.success = false;
 			result.missingFields.push('email');
 		}
-		
+
 		if (!this.config.apiToken) {
 			result.success = false;
 			result.missingFields.push('apiToken');
 		}
-		
+
 		if (!this.config.project) {
 			result.success = false;
 			result.missingFields.push('project');
 		}
-		
+
 		// Log validation result if a logger is provided
 		if (log && !result.success) {
-			log.error(`Jira configuration validation failed. Missing fields: ${result.missingFields.join(', ')}`);
-			log.error('Please set the following environment variables or configuration values:');
+			log.error(
+				`Jira configuration validation failed. Missing fields: ${result.missingFields.join(', ')}`
+			);
+			log.error(
+				'Please set the following environment variables or configuration values:'
+			);
 			if (result.missingFields.includes('baseUrl')) {
-				log.error('- JIRA_API_URL: Your Jira instance URL (e.g., "https://your-domain.atlassian.net")');
+				log.error(
+					'- JIRA_API_URL: Your Jira instance URL (e.g., "https://your-domain.atlassian.net")'
+				);
 			}
 			if (result.missingFields.includes('email')) {
-				log.error('- JIRA_EMAIL: Email address associated with your Jira account');
+				log.error(
+					'- JIRA_EMAIL: Email address associated with your Jira account'
+				);
 			}
 			if (result.missingFields.includes('apiToken')) {
-				log.error('- JIRA_API_TOKEN: API token generated from your Atlassian account');
+				log.error(
+					'- JIRA_API_TOKEN: API token generated from your Atlassian account'
+				);
 			}
 			if (result.missingFields.includes('project')) {
 				log.error('- JIRA_PROJECT: Your Jira project key (e.g., "PROJ")');
 			}
 		}
-		
+
 		return result;
 	}
 
@@ -139,13 +156,17 @@ export class JiraClient {
 	 */
 	getClient() {
 		if (!this.enabled) {
-			throw new Error('Jira integration is not enabled. Please configure the required environment variables.');
+			throw new Error(
+				'Jira integration is not enabled. Please configure the required environment variables.'
+			);
 		}
-		
+
 		if (!this.client) {
-			throw new Error(`Jira client initialization failed: ${this.error || 'Unknown error'}`);
+			throw new Error(
+				`Jira client initialization failed: ${this.error || 'Unknown error'}`
+			);
 		}
-		
+
 		return this.client;
 	}
 
@@ -186,24 +207,31 @@ export class JiraClient {
 	async fetchIssue(issueKey, options = {}) {
 		const log = options.log || console;
 		const expand = options.expand !== undefined ? options.expand : true;
-		
+
 		try {
 			if (!this.isReady()) {
-				return this.createErrorResponse('JIRA_NOT_ENABLED', 'Jira integration is not properly configured');
+				return this.createErrorResponse(
+					'JIRA_NOT_ENABLED',
+					'Jira integration is not properly configured'
+				);
 			}
-			
+
 			log.info?.(`Fetching Jira issue with key: ${issueKey}`);
-			
+
 			const client = this.getClient();
 			const response = await client.get(`/rest/api/3/issue/${issueKey}`, {
 				params: {
-					fields: 'summary,description,status,priority,issuetype,parent,issuelinks,subtasks',
+					fields:
+						'summary,description,status,priority,issuetype,parent,issuelinks,subtasks',
 					...(expand ? { expand: 'renderedFields' } : {})
 				}
 			});
-			
+
 			if (!response.data) {
-				return this.createErrorResponse('JIRA_INVALID_RESPONSE', 'Invalid response from Jira API');
+				return this.createErrorResponse(
+					'JIRA_INVALID_RESPONSE',
+					'Invalid response from Jira API'
+				);
 			}
 
 			return {
@@ -233,33 +261,40 @@ export class JiraClient {
 		const log = options.log || console;
 		const maxResults = options.maxResults || 100;
 		const expand = options.expand !== undefined ? options.expand : true;
-		
+
 		try {
 			if (!this.isReady()) {
-				return this.createErrorResponse('JIRA_NOT_ENABLED', 'Jira integration is not properly configured');
+				return this.createErrorResponse(
+					'JIRA_NOT_ENABLED',
+					'Jira integration is not properly configured'
+				);
 			}
-			
+
 			log.info?.(`Searching Jira issues with JQL: ${jql}`);
-			
+
 			const client = this.getClient();
 			const response = await client.get('/rest/api/3/search', {
 				params: {
 					jql,
 					maxResults,
-					fields: 'summary,description,status,priority,issuetype,parent,issuelinks,subtasks',
+					fields:
+						'summary,description,status,priority,issuetype,parent,issuelinks,subtasks',
 					...(expand ? { expand: 'renderedFields' } : {})
 				}
 			});
-			
+
 			if (!response.data || !response.data.issues) {
-				return this.createErrorResponse('JIRA_INVALID_RESPONSE', 'Invalid response from Jira API');
+				return this.createErrorResponse(
+					'JIRA_INVALID_RESPONSE',
+					'Invalid response from Jira API'
+				);
 			}
-			
+
 			// Convert each issue to a JiraTicket object
 			const jiraTickets = await Promise.all(
-				response.data.issues.map(issue => JiraTicket.fromJiraIssue(issue))
+				response.data.issues.map((issue) => JiraTicket.fromJiraIssue(issue))
 			);
-			
+
 			// Return the modified response with JiraTicket objects
 			return {
 				success: true,
@@ -284,21 +319,30 @@ export class JiraClient {
 	 */
 	async createIssue(issueData, options = {}) {
 		const log = options.log || console;
-		
+
 		try {
 			if (!this.isReady()) {
-				return this.createErrorResponse('JIRA_NOT_ENABLED', 'Jira integration is not properly configured');
+				return this.createErrorResponse(
+					'JIRA_NOT_ENABLED',
+					'Jira integration is not properly configured'
+				);
 			}
-			
+
 			log.info?.(`Creating new Jira issue`);
-			
+
 			const client = this.getClient();
-			const response = await client.post('/rest/api/3/issue', issueData.toJiraRequestData());
-			
+			const response = await client.post(
+				'/rest/api/3/issue',
+				issueData.toJiraRequestData()
+			);
+
 			if (!response.data) {
-				return this.createErrorResponse('JIRA_INVALID_RESPONSE', 'Invalid response from Jira API');
+				return this.createErrorResponse(
+					'JIRA_INVALID_RESPONSE',
+					'Invalid response from Jira API'
+				);
 			}
-			
+
 			return {
 				success: true,
 				data: response.data
@@ -323,17 +367,23 @@ export class JiraClient {
 	 */
 	async updateIssue(issueKey, issueData, options = {}) {
 		const log = options.log || console;
-		
+
 		try {
 			if (!this.isReady()) {
-				return this.createErrorResponse('JIRA_NOT_ENABLED', 'Jira integration is not properly configured');
+				return this.createErrorResponse(
+					'JIRA_NOT_ENABLED',
+					'Jira integration is not properly configured'
+				);
 			}
-			
+
 			log.info?.(`Updating Jira issue ${issueKey}`);
-			
+
 			const client = this.getClient();
-			const response = await client.put(`/rest/api/3/issue/${issueKey}`, issueData);
-			
+			const response = await client.put(
+				`/rest/api/3/issue/${issueKey}`,
+				issueData
+			);
+
 			// Jira returns 204 No Content for successful updates
 			return {
 				success: true,
@@ -359,40 +409,52 @@ export class JiraClient {
 	 */
 	async transitionIssue(issueKey, transitionName, options = {}) {
 		const log = options.log || console;
-		
+
 		try {
 			if (!this.isReady()) {
-				return this.createErrorResponse('JIRA_NOT_ENABLED', 'Jira integration is not properly configured');
+				return this.createErrorResponse(
+					'JIRA_NOT_ENABLED',
+					'Jira integration is not properly configured'
+				);
 			}
-			
+
 			log.info?.(`Transitioning Jira issue ${issueKey} to ${transitionName}`);
-			
+
 			// First, get available transitions
 			const client = this.getClient();
-			const transitionsResponse = await client.get(`/rest/api/3/issue/${issueKey}/transitions`);
-			
+			const transitionsResponse = await client.get(
+				`/rest/api/3/issue/${issueKey}/transitions`
+			);
+
 			if (!transitionsResponse.data || !transitionsResponse.data.transitions) {
-				return this.createErrorResponse('JIRA_INVALID_RESPONSE', 'Invalid transitions response from Jira API');
+				return this.createErrorResponse(
+					'JIRA_INVALID_RESPONSE',
+					'Invalid transitions response from Jira API'
+				);
 			}
-			
+
 			// Find the transition ID by name
 			const transition = transitionsResponse.data.transitions.find(
-				t => t.name.toLowerCase() === transitionName.toLowerCase()
+				(t) => t.name.toLowerCase() === transitionName.toLowerCase()
 			);
-			
+
 			if (!transition) {
 				return this.createErrorResponse(
 					'JIRA_INVALID_TRANSITION',
 					`Transition '${transitionName}' not found for issue ${issueKey}`,
-					{ availableTransitions: transitionsResponse.data.transitions.map(t => t.name) }
+					{
+						availableTransitions: transitionsResponse.data.transitions.map(
+							(t) => t.name
+						)
+					}
 				);
 			}
-			
+
 			// Perform the transition
 			await client.post(`/rest/api/3/issue/${issueKey}/transitions`, {
 				transition: { id: transition.id }
 			});
-			
+
 			return {
 				success: true,
 				data: { issueKey, transition: transitionName }
@@ -416,21 +478,29 @@ export class JiraClient {
 	 */
 	async getTransitions(issueKey, options = {}) {
 		const log = options.log || console;
-		
+
 		try {
 			if (!this.isReady()) {
-				return this.createErrorResponse('JIRA_NOT_ENABLED', 'Jira integration is not properly configured');
+				return this.createErrorResponse(
+					'JIRA_NOT_ENABLED',
+					'Jira integration is not properly configured'
+				);
 			}
-			
+
 			log.info?.(`Getting transitions for Jira issue ${issueKey}`);
-			
+
 			const client = this.getClient();
-			const response = await client.get(`/rest/api/3/issue/${issueKey}/transitions`);
-			
+			const response = await client.get(
+				`/rest/api/3/issue/${issueKey}/transitions`
+			);
+
 			if (!response.data || !response.data.transitions) {
-				return this.createErrorResponse('JIRA_INVALID_RESPONSE', 'Invalid transitions response from Jira API');
+				return this.createErrorResponse(
+					'JIRA_INVALID_RESPONSE',
+					'Invalid transitions response from Jira API'
+				);
 			}
-			
+
 			return {
 				success: true,
 				data: response.data
@@ -444,4 +514,4 @@ export class JiraClient {
 			);
 		}
 	}
-} 
+}

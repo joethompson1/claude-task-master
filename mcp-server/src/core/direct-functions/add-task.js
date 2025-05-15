@@ -175,8 +175,6 @@ export async function addTaskDirect(args, log, context = {}) {
 	}
 }
 
-
-
 /**
  * Create a top-level Jira task, optionally linked to an Epic
  * @param {Object} args - Function arguments
@@ -195,74 +193,73 @@ export async function addTaskDirect(args, log, context = {}) {
  * @returns {Promise<Object>} - Result object with success status and data/error
  */
 export async function addJiraTaskDirect(args, log, context = {}) {
-    try {
-        // Extract parameters from args
-        const { 
-            title, 
-            issueType,
-            description,
+	try {
+		// Extract parameters from args
+		const {
+			title,
+			issueType,
+			description,
 			details,
 			acceptanceCriteria,
 			testStrategy,
-            parentKey,
-            priority, 
-            assignee, 
-            labels
-        } = args;
-        
-        // Validate required parameters
-        if (!title) {
-            return {
-                success: false,
-                error: {
-                    code: 'MISSING_PARAMETER',
-                    message: 'Task title/summary is required'
-                }
-            };
-        }
-        
-        log.info(`Creating Jira task with title "${title}"`);
-        
-        if (parentKey) {
-            log.info(`Task will be linked to parent/epic: ${parentKey}`);
-        }
+			parentKey,
+			priority,
+			assignee,
+			labels
+		} = args;
 
-        // Use the JiraTicket class to manage the ticket data and ADF conversion
-        const jiraTicket = new JiraTicket({
-            title: title,
-            description: description,
+		// Validate required parameters
+		if (!title) {
+			return {
+				success: false,
+				error: {
+					code: 'MISSING_PARAMETER',
+					message: 'Task title/summary is required'
+				}
+			};
+		}
+
+		log.info(`Creating Jira task with title "${title}"`);
+
+		if (parentKey) {
+			log.info(`Task will be linked to parent/epic: ${parentKey}`);
+		}
+
+		// Use the JiraTicket class to manage the ticket data and ADF conversion
+		const jiraTicket = new JiraTicket({
+			title: title,
+			description: description,
 			details: details,
 			acceptanceCriteria: acceptanceCriteria,
 			testStrategy: testStrategy,
 			parentKey: parentKey,
-            priority: priority ? priority.charAt(0).toUpperCase() + priority.slice(1) : 'Medium',
-            issueType: issueType || 'Task',
-            assignee: assignee,
-            labels: labels
-        });
+			priority: priority
+				? priority.charAt(0).toUpperCase() + priority.slice(1)
+				: 'Medium',
+			issueType: issueType || 'Task',
+			assignee: assignee,
+			labels: labels
+		});
 
 		// Call the createJiraIssue function with 'Task' as the issue type
-        const result = await createJiraIssue(
-            jiraTicket,
-            log
-        );
-        
-        // Return the result directly
-        return result;
-    } catch (error) {
-        // Log the error
-        log.error(`Error in addJiraTaskDirect: ${error.message}`);
-        
-        // Return structured error response
-        return {
-            success: false,
-            error: {
-                code: 'DIRECT_FUNCTION_ERROR',
-                message: error.message,
-                details: error.stack,
-                // Preserve any displayMessage from the error object
-                displayMessage: error.error?.displayMessage || error.message
-            }
-        };
-    }
-} 
+		const result = await createJiraIssue(jiraTicket, log);
+
+		// Return the result directly
+		return result;
+	} catch (error) {
+		// Log the error
+		log.error(`Error in addJiraTaskDirect: ${error.message}`);
+
+		// Return structured error response
+		return {
+			success: false,
+			error: {
+				code: 'DIRECT_FUNCTION_ERROR',
+				message: error.message,
+				details: error.stack,
+				// Preserve any displayMessage from the error object
+				displayMessage: error.error?.displayMessage || error.message
+			}
+		};
+	}
+}

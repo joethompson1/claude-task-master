@@ -1,6 +1,6 @@
 /**
  * jira-ticket.js
- * 
+ *
  * Class for managing Jira ticket data and converting between Task Master and Jira formats.
  * This class helps standardize Jira ticket operations by providing methods to:
  * 1. Convert markdown content to Atlassian Document Format (ADF)
@@ -36,7 +36,9 @@ export class JiraTicket {
 		this.details = data.details || '';
 		this.acceptanceCriteria = data.acceptanceCriteria || '';
 		this.testStrategy = data.testStrategy || '';
-		this.priority = data.priority ? data.priority.charAt(0).toUpperCase() + data.priority.slice(1) : 'Medium';
+		this.priority = data.priority
+			? data.priority.charAt(0).toUpperCase() + data.priority.slice(1)
+			: 'Medium';
 		this.issueType = data.issueType || 'Task';
 		this.parentKey = data.parentKey || '';
 		this.labels = data.labels || [];
@@ -68,55 +70,62 @@ export class JiraTicket {
 		if (data.title !== undefined) {
 			this.title = data.title;
 		}
-		
+
 		if (data.description !== undefined) {
 			this.description = data.description;
 		}
-		
-		if (data.details !== undefined || data.implementationDetails !== undefined) {
+
+		if (
+			data.details !== undefined ||
+			data.implementationDetails !== undefined
+		) {
 			this.details = data.details || data.implementationDetails;
 		}
-		
+
 		if (data.acceptanceCriteria !== undefined) {
 			this.acceptanceCriteria = data.acceptanceCriteria;
 		}
-		
+
 		if (data.testStrategy !== undefined || data.testStrategyTdd !== undefined) {
 			this.testStrategy = data.testStrategy || data.testStrategyTdd;
 		}
-		
+
 		if (data.priority !== undefined) {
-			this.priority = data.priority ? data.priority.charAt(0).toUpperCase() + data.priority.slice(1) : 'Medium';
+			this.priority = data.priority
+				? data.priority.charAt(0).toUpperCase() + data.priority.slice(1)
+				: 'Medium';
 		}
-		
+
 		if (data.issueType !== undefined) {
 			this.issueType = data.issueType || 'Task';
 		}
-		
+
 		if (data.parentKey !== undefined) {
 			this.parentKey = data.parentKey;
 		}
-		
+
 		if (data.labels !== undefined) {
 			this.labels = Array.isArray(data.labels) ? data.labels : [];
 		}
-		
+
 		if (data.assignee !== undefined) {
 			this.assignee = data.assignee;
 		}
-		
+
 		if (data.jiraKey !== undefined) {
 			this.jiraKey = data.jiraKey;
 		}
-		
+
 		if (data.dependencies !== undefined) {
-			this.dependencies = Array.isArray(data.dependencies) ? data.dependencies : [];
+			this.dependencies = Array.isArray(data.dependencies)
+				? data.dependencies
+				: [];
 		}
-		
+
 		if (data.status !== undefined) {
 			this.status = data.status;
 		}
-		
+
 		return this;
 	}
 
@@ -152,18 +161,18 @@ export class JiraTicket {
 	 */
 	_convertMarkdownToAdf(text) {
 		if (!text) return [];
-		
+
 		// Basic paragraph split by double newline
 		const paragraphs = text.split(/\n\n+/);
 		const nodes = [];
-		
-		paragraphs.forEach(paragraph => {
+
+		paragraphs.forEach((paragraph) => {
 			// Check for code block
 			if (paragraph.startsWith('```') && paragraph.endsWith('```')) {
 				// Extract language if specified after first ``` (e.g. ```javascript)
 				let language = null;
 				let content = paragraph.substring(3, paragraph.length - 3);
-				
+
 				const firstLineBreak = content.indexOf('\n');
 				if (firstLineBreak > 0) {
 					const possibleLang = content.substring(0, firstLineBreak).trim();
@@ -172,89 +181,99 @@ export class JiraTicket {
 						content = content.substring(firstLineBreak + 1);
 					}
 				}
-				
+
 				nodes.push({
-					type: "codeBlock",
+					type: 'codeBlock',
 					attrs: { language },
-					content: [{ type: "text", text: content.trim() }]
+					content: [{ type: 'text', text: content.trim() }]
 				});
-			} 
+			}
 			// Check for heading
 			else if (paragraph.startsWith('# ')) {
 				nodes.push({
-					type: "heading",
+					type: 'heading',
 					attrs: { level: 1 },
-					content: [{ type: "text", text: paragraph.substring(2).trim() }]
+					content: [{ type: 'text', text: paragraph.substring(2).trim() }]
 				});
 			} else if (paragraph.startsWith('## ')) {
 				nodes.push({
-					type: "heading",
+					type: 'heading',
 					attrs: { level: 2 },
-					content: [{ type: "text", text: paragraph.substring(3).trim() }]
+					content: [{ type: 'text', text: paragraph.substring(3).trim() }]
 				});
 			} else if (paragraph.startsWith('### ')) {
 				nodes.push({
-					type: "heading",
+					type: 'heading',
 					attrs: { level: 3 },
-					content: [{ type: "text", text: paragraph.substring(4).trim() }]
+					content: [{ type: 'text', text: paragraph.substring(4).trim() }]
 				});
 			} else if (paragraph.startsWith('- ') || paragraph.startsWith('* ')) {
 				// Simple bullet list
-				const items = paragraph.split(/\n/).filter(line => line.trim().startsWith('- ') || line.trim().startsWith('* '));
-				const listItems = items.map(item => {
+				const items = paragraph
+					.split(/\n/)
+					.filter(
+						(line) =>
+							line.trim().startsWith('- ') || line.trim().startsWith('* ')
+					);
+				const listItems = items.map((item) => {
 					const content = item.replace(/^[-*]\s+/, '').trim();
 					return {
-						type: "listItem",
-						content: [{
-							type: "paragraph",
-							content: this._parseInlineFormatting(content)
-						}]
+						type: 'listItem',
+						content: [
+							{
+								type: 'paragraph',
+								content: this._parseInlineFormatting(content)
+							}
+						]
 					};
 				});
-				
+
 				nodes.push({
-					type: "bulletList",
+					type: 'bulletList',
 					content: listItems
 				});
-			} 
+			}
 			// Check for ordered (numbered) list: 1. item, 2. item, etc.
 			else if (/^\d+\.\s/.test(paragraph)) {
 				const lines = paragraph.split(/\n/);
-				const numberedItems = lines.filter(line => /^\d+\.\s/.test(line.trim()));
-				
+				const numberedItems = lines.filter((line) =>
+					/^\d+\.\s/.test(line.trim())
+				);
+
 				if (numberedItems.length > 0) {
-					const listItems = numberedItems.map(item => {
+					const listItems = numberedItems.map((item) => {
 						const content = item.replace(/^\d+\.\s+/, '').trim();
 						return {
-							type: "listItem",
-							content: [{
-								type: "paragraph",
-								content: this._parseInlineFormatting(content)
-							}]
+							type: 'listItem',
+							content: [
+								{
+									type: 'paragraph',
+									content: this._parseInlineFormatting(content)
+								}
+							]
 						};
 					});
-					
+
 					nodes.push({
-						type: "orderedList",
+						type: 'orderedList',
 						content: listItems
 					});
 				} else {
 					// Fall back to regular paragraph if no valid items
 					nodes.push({
-						type: "paragraph",
+						type: 'paragraph',
 						content: this._parseInlineFormatting(paragraph)
 					});
 				}
-			}
-			else {
+			} else {
 				// Regular paragraph with potential inline formatting
 				nodes.push({
-					type: "paragraph",
+					type: 'paragraph',
 					content: this._parseInlineFormatting(paragraph)
 				});
 			}
 		});
-		
+
 		return nodes;
 	}
 
@@ -265,87 +284,92 @@ export class JiraTicket {
 	 * @private
 	 */
 	_parseInlineFormatting(text) {
-		if (!text) return [{ type: "text", text: "" }];
-		
+		if (!text) return [{ type: 'text', text: '' }];
+
 		// Simple patterns for inline formatting
 		const elements = [];
 		let remaining = text;
-		
+
 		// Process text for patterns
 		while (remaining.length > 0) {
 			// Bold: **text**
 			const boldMatch = remaining.match(/^\*\*(.*?)\*\*/);
 			if (boldMatch) {
 				elements.push({
-					type: "text",
-					marks: [{ type: "strong" }],
+					type: 'text',
+					marks: [{ type: 'strong' }],
 					text: boldMatch[1]
 				});
 				remaining = remaining.substring(boldMatch[0].length);
 				continue;
 			}
-			
+
 			// Italic: *text*
 			const italicMatch = remaining.match(/^\*(.*?)\*/);
 			if (italicMatch) {
 				elements.push({
-					type: "text",
-					marks: [{ type: "em" }],
+					type: 'text',
+					marks: [{ type: 'em' }],
 					text: italicMatch[1]
 				});
 				remaining = remaining.substring(italicMatch[0].length);
 				continue;
 			}
-			
+
 			// Inline code: `code`
 			const codeMatch = remaining.match(/^`(.*?)`/);
 			if (codeMatch) {
 				elements.push({
-					type: "text",
-					marks: [{ type: "code" }],
+					type: 'text',
+					marks: [{ type: 'code' }],
 					text: codeMatch[1]
 				});
 				remaining = remaining.substring(codeMatch[0].length);
 				continue;
 			}
-			
+
 			// Link: [text](url)
 			const linkMatch = remaining.match(/^\[(.*?)\]\((.*?)\)/);
 			if (linkMatch) {
 				elements.push({
-					type: "text",
-					marks: [{ 
-						type: "link", 
-						attrs: { 
-							href: linkMatch[2],
-							title: linkMatch[1]
-						} 
-					}],
+					type: 'text',
+					marks: [
+						{
+							type: 'link',
+							attrs: {
+								href: linkMatch[2],
+								title: linkMatch[1]
+							}
+						}
+					],
 					text: linkMatch[1]
 				});
 				remaining = remaining.substring(linkMatch[0].length);
 				continue;
 			}
-			
+
 			// If no patterns match, take the next character as plain text
 			const nextChar = remaining.charAt(0);
-			
+
 			// If we already have a text element, append to it
-			if (elements.length > 0 && 
-					elements[elements.length - 1].type === "text" && 
-					(!elements[elements.length - 1].marks || elements[elements.length - 1].marks.length === 0)) {
+			if (
+				elements.length > 0 &&
+				elements[elements.length - 1].type === 'text' &&
+				(!elements[elements.length - 1].marks ||
+					elements[elements.length - 1].marks.length === 0)
+			) {
 				elements[elements.length - 1].text += nextChar;
 			} else {
 				elements.push({
-					type: "text",
+					type: 'text',
 					text: nextChar
 				});
 			}
-			
+
 			remaining = remaining.substring(1);
 		}
-		
-		return elements.length > 0 ? elements : [{ type: "text", text: text }];
+
+		return elements.length > 0 ? elements : [{ type: 'text', text: text }];
 	}
 
 	/**
@@ -358,13 +382,13 @@ export class JiraTicket {
 	 */
 	_createPanel(panelType, title, content) {
 		return {
-			type: "panel",
+			type: 'panel',
 			attrs: { panelType },
 			content: [
 				{
-					type: "heading",
+					type: 'heading',
 					attrs: { level: 2 },
-					content: [{ type: "text", text: title }]
+					content: [{ type: 'text', text: title }]
 				},
 				...this._convertMarkdownToAdf(content)
 			]
@@ -378,35 +402,45 @@ export class JiraTicket {
 	toADF() {
 		const adf = {
 			version: 1,
-			type: "doc",
+			type: 'doc',
 			content: []
 		};
 
 		// Add main description
 		if (this.description) {
 			adf.content.push(...this._convertMarkdownToAdf(this.description));
-			
+
 			// Add a divider if we have more sections
 			if (this.details || this.acceptanceCriteria || this.testStrategy) {
 				adf.content.push({
-					type: "rule"
+					type: 'rule'
 				});
 			}
 		}
 
 		// Add Implementation Details section if available
 		if (this.details) {
-			adf.content.push(this._createPanel("info", "Implementation Details", this.details));
+			adf.content.push(
+				this._createPanel('info', 'Implementation Details', this.details)
+			);
 		}
 
 		// Add Acceptance Criteria section if available
 		if (this.acceptanceCriteria) {
-			adf.content.push(this._createPanel("success", "Acceptance Criteria", this.acceptanceCriteria));
+			adf.content.push(
+				this._createPanel(
+					'success',
+					'Acceptance Criteria',
+					this.acceptanceCriteria
+				)
+			);
 		}
 
 		// Add Test Strategy section if available
 		if (this.testStrategy) {
-			adf.content.push(this._createPanel("note", "Test Strategy (TDD)", this.testStrategy));
+			adf.content.push(
+				this._createPanel('note', 'Test Strategy (TDD)', this.testStrategy)
+			);
 		}
 
 		return adf;
@@ -432,25 +466,29 @@ export class JiraTicket {
 				}
 			}
 		};
-		
+
 		// Add parent reference for subtasks or linking to epics
 		if (this.parentKey) {
 			requestBody.fields.parent = {
 				key: this.parentKey
 			};
 		}
-		
+
 		// Add description if provided (using Atlassian Document Format for Jira API v3)
 		if (this.description) {
 			// Check if we have additional panels to include
-			const hasAdditionalContent = this.details || this.acceptanceCriteria || this.testStrategy;
-			
+			const hasAdditionalContent =
+				this.details || this.acceptanceCriteria || this.testStrategy;
+
 			// If we have additional content, always use toADF() to include all panels
 			if (hasAdditionalContent) {
 				requestBody.fields.description = this.toADF();
 			} else {
 				// Only if there's no additional content, do the simple conversion
-				if (typeof this.description === 'object' && this.description.type === 'doc') {
+				if (
+					typeof this.description === 'object' &&
+					this.description.type === 'doc'
+				) {
 					requestBody.fields.description = this.description;
 				} else if (typeof this.description === 'string') {
 					// If it's a simple string, convert to basic ADF format
@@ -475,24 +513,24 @@ export class JiraTicket {
 				}
 			}
 		}
-		
+
 		// Add optional fields if provided
 		if (this.priority) {
 			requestBody.fields.priority = {
 				name: this.priority
 			};
 		}
-		
+
 		if (this.assignee) {
 			requestBody.fields.assignee = {
 				accountId: this.assignee
 			};
 		}
-		
+
 		if (this.labels && Array.isArray(this.labels) && this.labels.length > 0) {
 			requestBody.fields.labels = this.labels;
 		}
-		
+
 		return requestBody;
 	}
 
@@ -502,14 +540,14 @@ export class JiraTicket {
 	 */
 	toTaskMasterFormat() {
 		return {
-			id: this.jiraKey || '', 
+			id: this.jiraKey || '',
 			title: this.title,
 			description: this.description,
 			details: this.details,
 			acceptanceCriteria: this.acceptanceCriteria,
 			testStrategy: this.testStrategy,
 			priority: JiraTicket.convertJiraPriorityToTaskMaster(this.priority),
-			status: JiraTicket.convertJiraStatusToTaskMaster(this.status), 
+			status: JiraTicket.convertJiraStatusToTaskMaster(this.status),
 			dependencies: this.dependencies,
 			jiraKey: this.jiraKey,
 			parentKey: this.parentKey
@@ -525,34 +563,38 @@ export class JiraTicket {
 		if (!description || !description.content) {
 			return {};
 		}
-		
+
 		const result = {};
-		
+
 		// Find all panels in the description
-		description.content.forEach(item => {
+		description.content.forEach((item) => {
 			if (item.type === 'panel') {
 				// Extract the panel heading (title)
-				const headingNode = item.content.find(node => 
-					node.type === 'heading' && 
-					node.content && 
-					node.content[0] && 
-					node.content[0].type === 'text'
+				const headingNode = item.content.find(
+					(node) =>
+						node.type === 'heading' &&
+						node.content &&
+						node.content[0] &&
+						node.content[0].type === 'text'
 				);
-				
+
 				if (headingNode) {
 					const panelTitle = headingNode.content[0].text;
 					let panelKey = JiraTicket.convertToCamelCase(panelTitle);
-					
+
 					// Extract panel content (everything except the heading)
-					const contentNodes = item.content.filter(node => node.type !== 'heading');
-					const extractedContent = JiraTicket.extractTextFromNodes(contentNodes);
-					
+					const contentNodes = item.content.filter(
+						(node) => node.type !== 'heading'
+					);
+					const extractedContent =
+						JiraTicket.extractTextFromNodes(contentNodes);
+
 					// Add to result object
 					result[panelKey] = extractedContent.trim();
 				}
 			}
 		});
-		
+
 		return result;
 	}
 
@@ -565,68 +607,74 @@ export class JiraTicket {
 		if (!nodes || !Array.isArray(nodes)) {
 			return '';
 		}
-		
-		return nodes.map(node => {
-			// Direct text node
-			if (node.type === 'text') {
-				// Handle marks for inline formatting
-				if (node.marks && node.marks.length > 0) {
-					const hasCode = node.marks.some(mark => mark.type === 'code');
-					if (hasCode) {
-						// For inline code, wrap with backticks
-						return `\`${node.text}\``;
+
+		return nodes
+			.map((node) => {
+				// Direct text node
+				if (node.type === 'text') {
+					// Handle marks for inline formatting
+					if (node.marks && node.marks.length > 0) {
+						const hasCode = node.marks.some((mark) => mark.type === 'code');
+						if (hasCode) {
+							// For inline code, wrap with backticks
+							return `\`${node.text}\``;
+						}
 					}
+					return node.text;
 				}
-				return node.text;
-			}
-			
-			// Code block
-			if (node.type === 'codeBlock') {
-				// Format as code block with triple backticks
-				return `\`\`\`\n${node.content ? JiraTicket.extractTextFromNodes(node.content) : ''}\n\`\`\``;
-			}
-			
-			// Paragraph node - extract text and add newline
-			if (node.type === 'paragraph') {
-				return JiraTicket.extractTextFromNodes(node.content) + '\n';
-			}
-			
-			// List item node - extract text, add bullet or number and newline
-			if (node.type === 'listItem') {
-				return '- ' + JiraTicket.extractTextFromNodes(node.content);
-			}
-			
-			// Ordered list - extract with numbers
-			if (node.type === 'orderedList') {
-				return node.content.map((item, index) => {
-					const itemContent = JiraTicket.extractTextFromNodes([item]);
-					return `${index + 1}. ${itemContent.replace(/^- /, '')}`;
-				}).join('\n');
-			}
-			
-			// Bullet list - extract with bullets
-			if (node.type === 'bulletList') {
-				return node.content.map(item => {
-					const itemContent = JiraTicket.extractTextFromNodes([item]);
-					return itemContent; // listItem already adds bullet
-				}).join('\n');
-			}
-			
-			// Handle heading nodes
-			if (node.type === 'heading') {
-				const level = node.attrs?.level || 1;
-				const headingText = JiraTicket.extractTextFromNodes(node.content);
-				// Add # characters based on heading level
-				return '#'.repeat(level) + ' ' + headingText + '\n';
-			}
-			
-			// Other nodes with content - recurse
-			if (node.content && Array.isArray(node.content)) {
-				return JiraTicket.extractTextFromNodes(node.content);
-			}
-			
-			return '';
-		}).join('');
+
+				// Code block
+				if (node.type === 'codeBlock') {
+					// Format as code block with triple backticks
+					return `\`\`\`\n${node.content ? JiraTicket.extractTextFromNodes(node.content) : ''}\n\`\`\``;
+				}
+
+				// Paragraph node - extract text and add newline
+				if (node.type === 'paragraph') {
+					return JiraTicket.extractTextFromNodes(node.content) + '\n';
+				}
+
+				// List item node - extract text, add bullet or number and newline
+				if (node.type === 'listItem') {
+					return '- ' + JiraTicket.extractTextFromNodes(node.content);
+				}
+
+				// Ordered list - extract with numbers
+				if (node.type === 'orderedList') {
+					return node.content
+						.map((item, index) => {
+							const itemContent = JiraTicket.extractTextFromNodes([item]);
+							return `${index + 1}. ${itemContent.replace(/^- /, '')}`;
+						})
+						.join('\n');
+				}
+
+				// Bullet list - extract with bullets
+				if (node.type === 'bulletList') {
+					return node.content
+						.map((item) => {
+							const itemContent = JiraTicket.extractTextFromNodes([item]);
+							return itemContent; // listItem already adds bullet
+						})
+						.join('\n');
+				}
+
+				// Handle heading nodes
+				if (node.type === 'heading') {
+					const level = node.attrs?.level || 1;
+					const headingText = JiraTicket.extractTextFromNodes(node.content);
+					// Add # characters based on heading level
+					return '#'.repeat(level) + ' ' + headingText + '\n';
+				}
+
+				// Other nodes with content - recurse
+				if (node.content && Array.isArray(node.content)) {
+					return JiraTicket.extractTextFromNodes(node.content);
+				}
+
+				return '';
+			})
+			.join('');
 	}
 
 	/**
@@ -638,7 +686,7 @@ export class JiraTicket {
 		if (!description || !description.content) {
 			return 'No description';
 		}
-		
+
 		// Find first paragraph or text content
 		for (const item of description.content) {
 			if (item.type === 'paragraph' || (item.type === 'text' && item.text)) {
@@ -648,9 +696,12 @@ export class JiraTicket {
 				}
 			}
 		}
-		
+
 		// If no paragraphs found, extract from the whole content
-		return JiraTicket.extractTextFromNodes(description.content).split('\n')[0] || 'No description';
+		return (
+			JiraTicket.extractTextFromNodes(description.content).split('\n')[0] ||
+			'No description'
+		);
 	}
 
 	/**
@@ -661,7 +712,7 @@ export class JiraTicket {
 	static convertToCamelCase(str) {
 		// Remove special characters and replace with spaces
 		const cleaned = str.replace(/[^\w\s]/g, ' ');
-		
+
 		// Split by space, capitalize first letter of each word except first, join
 		return cleaned
 			.split(/\s+/)
@@ -681,13 +732,13 @@ export class JiraTicket {
 	 */
 	static convertJiraPriorityToTaskMaster(jiraPriority) {
 		const priorityMapping = {
-			'Highest': 'high',
-			'High': 'high',
-			'Medium': 'medium',
-			'Low': 'low',
-			'Lowest': 'low'
+			Highest: 'high',
+			High: 'high',
+			Medium: 'medium',
+			Low: 'low',
+			Lowest: 'low'
 		};
-		
+
 		return priorityMapping[jiraPriority] || 'medium';
 	}
 
@@ -700,12 +751,12 @@ export class JiraTicket {
 		const statusMapping = {
 			'To Do': 'pending',
 			'In Progress': 'in-progress',
-			'Done': 'done',
-			'Blocked': 'blocked',
-			'Deferred': 'deferred',
-			'Cancelled': 'cancelled'
+			Done: 'done',
+			Blocked: 'blocked',
+			Deferred: 'deferred',
+			Cancelled: 'cancelled'
 		};
-		
+
 		return statusMapping[jiraStatus] || 'pending';
 	}
 
@@ -721,7 +772,9 @@ export class JiraTicket {
 			details: task.details,
 			acceptanceCriteria: task.acceptanceCriteria,
 			testStrategy: task.testStrategy,
-			priority: task.priority ? task.priority.charAt(0).toUpperCase() + task.priority.slice(1) : 'Medium',
+			priority: task.priority
+				? task.priority.charAt(0).toUpperCase() + task.priority.slice(1)
+				: 'Medium',
 			jiraKey: task.jiraKey,
 			dependencies: task.dependencies
 		});
@@ -736,38 +789,50 @@ export class JiraTicket {
 		// Import necessary functions from jira-utils.js
 		// Using the existing functions directly from the imported module
 		// No need to redefine them here
-		
+
 		// Extract panel content from description if available
 		let panelData = {};
 		if (jiraIssue.fields?.description) {
 			try {
 				// Use the extraction function from jira-utils module
-				panelData = JiraTicket.extractPanelsFromDescription(jiraIssue.fields.description);
+				panelData = JiraTicket.extractPanelsFromDescription(
+					jiraIssue.fields.description
+				);
 			} catch (error) {
-				console.warn(`Error extracting panels from Jira issue description: ${error.message}`);
+				console.warn(
+					`Error extracting panels from Jira issue description: ${error.message}`
+				);
 			}
 		}
-		
+
 		// Extract dependencies from issuelinks
 		const dependencies = [];
-		if (jiraIssue.fields?.issuelinks && jiraIssue.fields.issuelinks.length > 0) {
-			jiraIssue.fields.issuelinks.forEach(link => {
+		if (
+			jiraIssue.fields?.issuelinks &&
+			jiraIssue.fields.issuelinks.length > 0
+		) {
+			jiraIssue.fields.issuelinks.forEach((link) => {
 				if (link.inwardIssue) {
 					dependencies.push(link.inwardIssue.key);
 				}
 			});
 		}
-		
+
 		// Extract description text if available
 		let description = 'No description';
 		if (jiraIssue.fields?.description) {
 			try {
-				description = JiraTicket.extractPlainTextDescription(jiraIssue.fields.description) || 'No description';
+				description =
+					JiraTicket.extractPlainTextDescription(
+						jiraIssue.fields.description
+					) || 'No description';
 			} catch (error) {
-				console.warn(`Error extracting plain text description: ${error.message}`);
+				console.warn(
+					`Error extracting plain text description: ${error.message}`
+				);
 			}
 		}
-		
+
 		// Create the initial ticket with standard fields
 		const ticket = new JiraTicket({
 			title: jiraIssue.fields?.summary || '',
@@ -779,27 +844,27 @@ export class JiraTicket {
 			dependencies: dependencies,
 			labels: jiraIssue.fields?.labels || []
 		});
-		
+
 		// Update ticket with panel data if available
 		// This might include details, acceptanceCriteria, testStrategy, etc.
 		if (Object.keys(panelData).length > 0) {
 			ticket.update(panelData);
 		}
-		
+
 		// Set parent key if this is a subtask
 		if (jiraIssue.fields?.parent) {
 			ticket.update({
 				parentKey: jiraIssue.fields.parent.key
 			});
 		}
-		
+
 		// Set assignee if available
 		if (jiraIssue.fields?.assignee) {
 			ticket.update({
 				assignee: jiraIssue.fields.assignee.accountId
 			});
 		}
-		
+
 		return ticket;
 	}
-} 
+}

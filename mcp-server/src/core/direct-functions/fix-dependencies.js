@@ -93,9 +93,11 @@ export async function fixDependenciesDirect(args, log) {
 export async function fixJiraDependenciesDirect(args, log, context = {}) {
 	const { parentKey } = args;
 	const { session } = context;
-	
+
 	try {
-		log.info(`Fixing invalid dependencies in Jira issues ${parentKey ? `for parent ${parentKey}` : 'in project'}`);
+		log.info(
+			`Fixing invalid dependencies in Jira issues ${parentKey ? `for parent ${parentKey}` : 'in project'}`
+		);
 
 		// Initialize Jira client
 		const jiraClient = new JiraClient();
@@ -110,12 +112,16 @@ export async function fixJiraDependenciesDirect(args, log, context = {}) {
 		}
 
 		// First, validate dependencies to find issues
-		const validationResult = await validateJiraDependenciesDirect(args, log, context);
-		
+		const validationResult = await validateJiraDependenciesDirect(
+			args,
+			log,
+			context
+		);
+
 		if (!validationResult.success) {
 			return validationResult; // Return the error response
 		}
-		
+
 		// If all dependencies are already valid, return early
 		if (validationResult.data.valid) {
 			return {
@@ -126,18 +132,26 @@ export async function fixJiraDependenciesDirect(args, log, context = {}) {
 				}
 			};
 		}
-		
+
 		// Begin fixing issues
-		log.info(`Found ${validationResult.data.issues.length} invalid dependencies to fix`);
+		log.info(
+			`Found ${validationResult.data.issues.length} invalid dependencies to fix`
+		);
 
 		// Enable silent mode to prevent console logs from interfering with JSON response
 		enableSilentMode();
-		
+
 		// Group issues by type for more targeted fixing
-		const selfDeps = validationResult.data.issues.filter(i => i.type === 'self');
-		const missingDeps = validationResult.data.issues.filter(i => i.type === 'missing');
-		const circularDeps = validationResult.data.issues.filter(i => i.type === 'circular');
-		
+		const selfDeps = validationResult.data.issues.filter(
+			(i) => i.type === 'self'
+		);
+		const missingDeps = validationResult.data.issues.filter(
+			(i) => i.type === 'missing'
+		);
+		const circularDeps = validationResult.data.issues.filter(
+			(i) => i.type === 'circular'
+		);
+
 		const stats = {
 			selfDepsRemoved: 0,
 			missingDepsRemoved: 0,
@@ -148,7 +162,7 @@ export async function fixJiraDependenciesDirect(args, log, context = {}) {
 
 		try {
 			const client = jiraClient.getClient();
-			
+
 			// Helper function to get issue links
 			async function getIssueLinks(issueKey) {
 				try {
@@ -157,50 +171,57 @@ export async function fixJiraDependenciesDirect(args, log, context = {}) {
 							fields: 'issuelinks'
 						}
 					});
-					
+
 					return response.data?.fields?.issuelinks || [];
 				} catch (error) {
-					log.error(`Error fetching issue links for ${issueKey}: ${error.message}`);
+					log.error(
+						`Error fetching issue links for ${issueKey}: ${error.message}`
+					);
 					return [];
 				}
 			}
-			
+
 			// Helper function to remove a specific dependency link
 			async function removeDependency(issueKey, dependencyKey) {
 				try {
 					// Get all issue links
 					const issueLinks = await getIssueLinks(issueKey);
-					
+
 					// Find the specific link that represents this dependency
 					let linkIdToRemove = null;
-					
+
 					for (const link of issueLinks) {
 						if (
-							(link.inwardIssue && link.inwardIssue.key === dependencyKey) || 
+							(link.inwardIssue && link.inwardIssue.key === dependencyKey) ||
 							(link.outwardIssue && link.outwardIssue.key === dependencyKey)
 						) {
 							linkIdToRemove = link.id;
 							break;
 						}
 					}
-					
+
 					// If no matching link was found
 					if (!linkIdToRemove) {
-						log.warn(`No dependency link found between issues ${issueKey} and ${dependencyKey}`);
+						log.warn(
+							`No dependency link found between issues ${issueKey} and ${dependencyKey}`
+						);
 						return false;
 					}
-					
+
 					// Delete the link
 					await client.delete(`/rest/api/3/issueLink/${linkIdToRemove}`);
-					log.info(`Successfully removed dependency link between ${issueKey} and ${dependencyKey}`);
+					log.info(
+						`Successfully removed dependency link between ${issueKey} and ${dependencyKey}`
+					);
 					return true;
-					
 				} catch (error) {
-					log.error(`Error removing dependency between ${issueKey} and ${dependencyKey}: ${error.message}`);
+					log.error(
+						`Error removing dependency between ${issueKey} and ${dependencyKey}: ${error.message}`
+					);
 					return false;
 				}
 			}
-			
+
 			// 1. Fix self-dependencies (remove them)
 			for (const dep of selfDeps) {
 				const success = await removeDependency(dep.issueKey, dep.issueKey);
@@ -211,7 +232,7 @@ export async function fixJiraDependenciesDirect(args, log, context = {}) {
 					stats.unfixable++;
 				}
 			}
-			
+
 			// 2. Fix missing dependencies (remove them)
 			for (const dep of missingDeps) {
 				const success = await removeDependency(dep.issueKey, dep.dependencyKey);
@@ -222,23 +243,23 @@ export async function fixJiraDependenciesDirect(args, log, context = {}) {
 					stats.unfixable++;
 				}
 			}
-			
+
 			// 3. Fix circular dependencies (remove one link in each cycle)
 			// We need to be more careful here to avoid breaking too many links
 			const fixedCircles = new Set();
-			
+
 			for (const dep of circularDeps) {
 				const cycleKey = `${dep.issueKey}-${dep.dependencyKey}`;
 				const reverseCycleKey = `${dep.dependencyKey}-${dep.issueKey}`;
-				
+
 				// Skip if we've already fixed this cycle
 				if (fixedCircles.has(cycleKey) || fixedCircles.has(reverseCycleKey)) {
 					continue;
 				}
-				
+
 				// Remove the dependency link
 				const success = await removeDependency(dep.issueKey, dep.dependencyKey);
-				
+
 				if (success) {
 					fixedCircles.add(cycleKey);
 					stats.circularDepsRemoved++;
@@ -247,26 +268,29 @@ export async function fixJiraDependenciesDirect(args, log, context = {}) {
 					stats.unfixable++;
 				}
 			}
-			
+
 			// Restore normal logging
 			disableSilentMode();
-			
+
 			// Format summary message
 			let summaryMessage = `Fixed ${stats.totalRemoved} dependencies`;
 			const details = [];
-			
-			if (stats.selfDepsRemoved > 0) details.push(`${stats.selfDepsRemoved} self-dependencies`);
-			if (stats.missingDepsRemoved > 0) details.push(`${stats.missingDepsRemoved} missing dependencies`);
-			if (stats.circularDepsRemoved > 0) details.push(`${stats.circularDepsRemoved} circular dependencies`);
-			
+
+			if (stats.selfDepsRemoved > 0)
+				details.push(`${stats.selfDepsRemoved} self-dependencies`);
+			if (stats.missingDepsRemoved > 0)
+				details.push(`${stats.missingDepsRemoved} missing dependencies`);
+			if (stats.circularDepsRemoved > 0)
+				details.push(`${stats.circularDepsRemoved} circular dependencies`);
+
 			if (details.length > 0) {
 				summaryMessage += ` (${details.join(', ')})`;
 			}
-			
+
 			if (stats.unfixable > 0) {
 				summaryMessage += `. Unable to fix ${stats.unfixable} dependencies.`;
 			}
-			
+
 			// Return success result
 			return {
 				success: true,
@@ -278,11 +302,10 @@ export async function fixJiraDependenciesDirect(args, log, context = {}) {
 					}
 				}
 			};
-			
 		} catch (error) {
 			// Handle errors from Jira API
 			disableSilentMode();
-			
+
 			log.error(`Error fixing Jira dependencies: ${error.message}`);
 			return {
 				success: false,

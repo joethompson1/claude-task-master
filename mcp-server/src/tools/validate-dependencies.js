@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { validateDependenciesDirect, validateJiraDependenciesDirect } from '../core/task-master-core.js';
+import {
+	validateDependenciesDirect,
+	validateJiraDependenciesDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -31,8 +34,10 @@ export function registerValidateDependenciesTool(server) {
 			}),
 			execute: withNormalizedProjectRoot(async (args, { log, session }) => {
 				try {
-					log.info(`Validating dependencies with args: ${JSON.stringify(args)}`);
-	
+					log.info(
+						`Validating dependencies with args: ${JSON.stringify(args)}`
+					);
+
 					// Use args.projectRoot directly (guaranteed by withNormalizedProjectRoot)
 					let tasksJsonPath;
 					try {
@@ -46,22 +51,24 @@ export function registerValidateDependenciesTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					const result = await validateDependenciesDirect(
 						{
 							tasksJsonPath: tasksJsonPath
 						},
 						log
 					);
-	
+
 					if (result.success) {
 						log.info(
 							`Successfully validated dependencies: ${result.data.message}`
 						);
 					} else {
-						log.error(`Failed to validate dependencies: ${result.error.message}`);
+						log.error(
+							`Failed to validate dependencies: ${result.error.message}`
+						);
 					}
-	
+
 					return handleApiResult(result, log, 'Error validating dependencies');
 				} catch (error) {
 					log.error(`Error in validateDependencies tool: ${error.message}`);
@@ -82,7 +89,9 @@ export function registerValidateDependenciesTool(server) {
 			}),
 			execute: async (args, { log, session }) => {
 				try {
-					log.info(`Validating Jira dependencies with args: ${JSON.stringify(args)}`);
+					log.info(
+						`Validating Jira dependencies with args: ${JSON.stringify(args)}`
+					);
 
 					const result = await validateJiraDependenciesDirect(
 						{
@@ -97,10 +106,16 @@ export function registerValidateDependenciesTool(server) {
 							`Successfully validated Jira dependencies: ${result.data.message}`
 						);
 					} else {
-						log.error(`Failed to validate Jira dependencies: ${result.error.message}`);
+						log.error(
+							`Failed to validate Jira dependencies: ${result.error.message}`
+						);
 					}
 
-					return handleApiResult(result, log, 'Error validating Jira dependencies');
+					return handleApiResult(
+						result,
+						log,
+						'Error validating Jira dependencies'
+					);
 				} catch (error) {
 					log.error(`Error in validate_dependencies tool: ${error.message}`);
 					return createErrorResponse(error.message);

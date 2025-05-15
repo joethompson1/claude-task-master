@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { removeTaskDirect, removeJiraTaskDirect } from '../core/task-master-core.js';
+import {
+	removeTaskDirect,
+	removeJiraTaskDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -40,7 +43,7 @@ export function registerRemoveTaskTool(server) {
 			execute: withNormalizedProjectRoot(async (args, { log }) => {
 				try {
 					log.info(`Removing task(s) with ID(s): ${args.id}`);
-	
+
 					// Use args.projectRoot directly (guaranteed by withNormalizedProjectRoot)
 					let tasksJsonPath;
 					try {
@@ -54,9 +57,9 @@ export function registerRemoveTaskTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					log.info(`Using tasks file path: ${tasksJsonPath}`);
-	
+
 					const result = await removeTaskDirect(
 						{
 							tasksJsonPath: tasksJsonPath,
@@ -64,13 +67,13 @@ export function registerRemoveTaskTool(server) {
 						},
 						log
 					);
-	
+
 					if (result.success) {
 						log.info(`Successfully removed task: ${args.id}`);
 					} else {
 						log.error(`Failed to remove task: ${result.error.message}`);
 					}
-	
+
 					return handleApiResult(result, log, 'Error removing task');
 				} catch (error) {
 					log.error(`Error in remove-task tool: ${error.message}`);
@@ -81,7 +84,8 @@ export function registerRemoveTaskTool(server) {
 	} else {
 		server.addTool({
 			name: 'remove_jira_task',
-			description: 'Remove a Jira issue (task or subtask) from the Jira project',
+			description:
+				'Remove a Jira issue (task or subtask) from the Jira project',
 			parameters: z.object({
 				id: z
 					.string()
@@ -92,7 +96,7 @@ export function registerRemoveTaskTool(server) {
 			execute: async (args, { log, session }) => {
 				try {
 					log.info(`Removing Jira issue(s) with key(s): ${args.id}`);
-					
+
 					// Call the direct function
 					const result = await removeJiraTaskDirect(
 						{
@@ -104,7 +108,9 @@ export function registerRemoveTaskTool(server) {
 					return handleApiResult(result, log, 'Error removing Jira issue');
 				} catch (error) {
 					log.error(`Error in remove-jira-task tool: ${error.message}`);
-					return createErrorResponse(`Failed to remove Jira issue: ${error.message}`);
+					return createErrorResponse(
+						`Failed to remove Jira issue: ${error.message}`
+					);
 				}
 			}
 		});

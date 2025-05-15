@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { expandTaskDirect, expandJiraTaskDirect } from '../core/task-master-core.js';
+import {
+	expandTaskDirect,
+	expandJiraTaskDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 /**
@@ -51,7 +54,7 @@ export function registerExpandTaskTool(server) {
 			execute: withNormalizedProjectRoot(async (args, { log, session }) => {
 				try {
 					log.info(`Starting expand-task with args: ${JSON.stringify(args)}`);
-	
+
 					// Use args.projectRoot directly (guaranteed by withNormalizedProjectRoot)
 					let tasksJsonPath;
 					try {
@@ -65,7 +68,7 @@ export function registerExpandTaskTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					const result = await expandTaskDirect(
 						{
 							tasksJsonPath: tasksJsonPath,
@@ -79,7 +82,7 @@ export function registerExpandTaskTool(server) {
 						log,
 						{ session }
 					);
-	
+
 					return handleApiResult(result, log, 'Error expanding task');
 				} catch (error) {
 					log.error(`Error in expand-task tool: ${error.message}`);
@@ -90,9 +93,14 @@ export function registerExpandTaskTool(server) {
 	} else {
 		server.addTool({
 			name: 'expand_jira_task',
-			description: 'Expand a jira task into jira subtasks for detailed implementation',
+			description:
+				'Expand a jira task into jira subtasks for detailed implementation',
 			parameters: z.object({
-				id: z.string().describe('ID of task to expand (Important: Make sure to include the project prefix, e.g. PROJ-123)'),
+				id: z
+					.string()
+					.describe(
+						'ID of task to expand (Important: Make sure to include the project prefix, e.g. PROJ-123)'
+					),
 				num: z.string().optional().describe('Number of subtasks to generate'),
 				research: z
 					.boolean()
@@ -107,7 +115,7 @@ export function registerExpandTaskTool(server) {
 			execute: async (args, { log, session }) => {
 				try {
 					log.info(`Starting expand-task with args: ${JSON.stringify(args)}`);
-	
+
 					// Get project root from args or session
 
 					// Call direct function with only session in the context, not reportProgress
@@ -123,7 +131,7 @@ export function registerExpandTaskTool(server) {
 						log,
 						{ session }
 					); // Only pass session, NOT reportProgress
-	
+
 					// Return the result
 					return handleApiResult(result, log, 'Error expanding task');
 				} catch (error) {

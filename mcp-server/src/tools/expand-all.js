@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { expandAllTasksDirect, expandAllJiraTasksDirect } from '../core/task-master-core.js';
+import {
+	expandAllTasksDirect,
+	expandAllJiraTasksDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -66,7 +69,7 @@ export function registerExpandAllTool(server) {
 					log.info(
 						`Tool expand_all execution started with args: ${JSON.stringify(args)}`
 					);
-	
+
 					let tasksJsonPath;
 					try {
 						tasksJsonPath = findTasksJsonPath(
@@ -80,7 +83,7 @@ export function registerExpandAllTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					const result = await expandAllTasksDirect(
 						{
 							tasksJsonPath: tasksJsonPath,
@@ -93,7 +96,7 @@ export function registerExpandAllTool(server) {
 						log,
 						{ session }
 					);
-	
+
 					return handleApiResult(result, log, 'Error expanding all tasks');
 				} catch (error) {
 					log.error(
@@ -141,7 +144,9 @@ export function registerExpandAllTool(server) {
 			}),
 			execute: async (args, { log, session }) => {
 				try {
-					log.info(`Expanding all Jira tasks with args: ${JSON.stringify(args)}`);
+					log.info(
+						`Expanding all Jira tasks with args: ${JSON.stringify(args)}`
+					);
 
 					// Call the direct function with only session in context
 					const result = await expandAllJiraTasksDirect(
@@ -158,7 +163,9 @@ export function registerExpandAllTool(server) {
 					);
 
 					if (result.success) {
-						log.info(`Successfully expanded all Jira tasks: ${result.data.message}`);
+						log.info(
+							`Successfully expanded all Jira tasks: ${result.data.message}`
+						);
 					} else {
 						log.error(
 							`Failed to expand all Jira tasks: ${result.error?.message || 'Unknown error'}`

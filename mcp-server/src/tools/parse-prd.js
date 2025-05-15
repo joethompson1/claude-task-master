@@ -10,7 +10,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { parsePRDDirect, parsePRDWithJiraDirect } from '../core/task-master-core.js';
+import {
+	parsePRDDirect,
+	parsePRDWithJiraDirect
+} from '../core/task-master-core.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
 /**
@@ -61,7 +64,7 @@ export function registerParsePRDTool(server) {
 					log.info(
 						`Executing ${toolName} tool with args: ${JSON.stringify(args)}`
 					);
-	
+
 					// Call Direct Function - Pass relevant args including projectRoot
 					const result = await parsePRDDirect(
 						{
@@ -75,7 +78,7 @@ export function registerParsePRDTool(server) {
 						log,
 						{ session }
 					);
-	
+
 					log.info(
 						`${toolName}: Direct function result: success=${result.success}`
 					);
@@ -94,12 +97,9 @@ export function registerParsePRDTool(server) {
 		server.addTool({
 			name: 'parse_prd',
 			description:
-				"Parse a Product Requirements Document (PRD) text file to automatically generate initial tasks that are saved as Jira issues. This version of the tool integrates with Jira using configured environment variables. Reinitializing the project is not necessary to run this tool.",
+				'Parse a Product Requirements Document (PRD) text file to automatically generate initial tasks that are saved as Jira issues. This version of the tool integrates with Jira using configured environment variables. Reinitializing the project is not necessary to run this tool.',
 			parameters: z.object({
-				prd: z
-					.string()
-					.optional()
-					.describe('The PRD text to parse'),
+				prd: z.string().optional().describe('The PRD text to parse'),
 				numTasks: z
 					.string()
 					.optional()
@@ -110,23 +110,27 @@ export function registerParsePRDTool(server) {
 					.string()
 					.optional()
 					.default('Task')
-					.describe('Jira issue type (default: "Task", "Epic", "Story", "Bug", "Subtask")'),
+					.describe(
+						'Jira issue type (default: "Task", "Epic", "Story", "Bug", "Subtask")'
+					),
 				jiraParentIssue: z
 					.string()
 					.optional()
-					.describe('Jira issue key of the parent issue/epic to link tasks to'),
+					.describe('Jira issue key of the parent issue/epic to link tasks to')
 			}),
 			execute: async (args, { log, session }) => {
 				try {
-					log.info(`Parsing PRD with Jira integration. Args: ${JSON.stringify(args)}`);
-	
+					log.info(
+						`Parsing PRD with Jira integration. Args: ${JSON.stringify(args)}`
+					);
+
 					// Check if PRD path was found
 					if (!args.prd) {
 						return createErrorResponse(
 							'No PRD document found or provided. Please ensure a PRD file exists (e.g., PRD.md) or provide a valid input file path.'
 						);
 					}
-	
+
 					// Call the direct function with Jira params
 					const result = await parsePRDWithJiraDirect(
 						{
@@ -139,7 +143,7 @@ export function registerParsePRDTool(server) {
 						log,
 						{ session }
 					);
-	
+
 					if (result.success) {
 						log.info(`Successfully parsed PRD: ${result.data.message}`);
 					} else {
@@ -147,10 +151,12 @@ export function registerParsePRDTool(server) {
 							`Failed to parse PRD: ${result.error?.message || 'Unknown error'}`
 						);
 					}
-	
+
 					return handleApiResult(result, log, 'Error parsing PRD');
 				} catch (error) {
-					log.error(`Error in parse-prd tool with Jira integration: ${error.message}`);
+					log.error(
+						`Error in parse-prd tool with Jira integration: ${error.message}`
+					);
 					return createErrorResponse(error.message);
 				}
 			}

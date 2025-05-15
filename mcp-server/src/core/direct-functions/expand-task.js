@@ -14,10 +14,7 @@ import {
 import path from 'path';
 import fs from 'fs';
 import { createLogWrapper } from '../../tools/utils.js';
-import { 
-	fetchJiraTaskDetails, 
-	expandJiraTask, 
-} from '../utils/jira-utils.js';
+import { fetchJiraTaskDetails, expandJiraTask } from '../utils/jira-utils.js';
 
 /**
  * Direct function wrapper for expanding a task into subtasks with error handling.
@@ -286,7 +283,7 @@ export async function expandJiraTaskDirect(args, log, context = {}) {
 			rootsStr: JSON.stringify(session?.roots)
 		})}`
 	);
-	
+
 	// Validate task ID
 	if (!id) {
 		log.error('Jira task ID is required');
@@ -328,26 +325,28 @@ export async function expandJiraTaskDirect(args, log, context = {}) {
 
 			// Restore normal logging
 			disableSilentMode();
-			
+
 			// Get the updated task details (if available)
 			let updatedTask;
 			try {
 				const updatedTaskDetails = await fetchJiraTaskDetails(id, true, log);
-				updatedTask = updatedTaskDetails.success ? updatedTaskDetails.data.task : null;
+				updatedTask = updatedTaskDetails.success
+					? updatedTaskDetails.data.task
+					: null;
 			} catch (fetchError) {
 				log.warn(`Could not fetch updated task details: ${fetchError.message}`);
 				// Continue with the result we have
 			}
-			
+
 			// Calculate subtasks info from what we have available
 			const subtasksData = result.data.subtasks || [];
 			const subtasksCount = result.data.subtasksCount || subtasksData.length;
-			
+
 			// Return the result
 			log.info(
 				`Successfully expanded Jira task ${id} with ${subtasksCount} new subtasks`
 			);
-			
+
 			return {
 				success: true,
 				data: {

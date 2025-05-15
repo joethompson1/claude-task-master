@@ -7,27 +7,84 @@
 // Import direct function implementations
 import { listTasksDirect } from './direct-functions/list-tasks.js';
 import { getCacheStatsDirect } from './direct-functions/cache-stats.js';
-import { parsePRDDirect, parsePRDWithJiraDirect } from './direct-functions/parse-prd.js';
-import { updateTasksDirect, updateJiraTasksDirect } from './direct-functions/update-tasks.js';
-import { updateTaskByIdDirect, updateJiraTaskByIdDirect } from './direct-functions/update-task-by-id.js';
-import { updateSubtaskByIdDirect, updateJiraSubtaskByIdDirect } from './direct-functions/update-subtask-by-id.js';
+import {
+	parsePRDDirect,
+	parsePRDWithJiraDirect
+} from './direct-functions/parse-prd.js';
+import {
+	updateTasksDirect,
+	updateJiraTasksDirect
+} from './direct-functions/update-tasks.js';
+import {
+	updateTaskByIdDirect,
+	updateJiraTaskByIdDirect
+} from './direct-functions/update-task-by-id.js';
+import {
+	updateSubtaskByIdDirect,
+	updateJiraSubtaskByIdDirect
+} from './direct-functions/update-subtask-by-id.js';
 import { generateTaskFilesDirect } from './direct-functions/generate-task-files.js';
-import { setTaskStatusDirect, setJiraTaskStatusDirect } from './direct-functions/set-task-status.js';
-import { showTaskDirect, showJiraTaskDirect } from './direct-functions/show-task.js';
-import { nextTaskDirect, nextJiraTaskDirect } from './direct-functions/next-task.js';
-import { expandTaskDirect, expandJiraTaskDirect } from './direct-functions/expand-task.js';
-import { addTaskDirect, addJiraTaskDirect } from './direct-functions/add-task.js';
-import { addSubtaskDirect, addJiraSubtaskDirect } from './direct-functions/add-subtask.js';
-import { removeSubtaskDirect, removeJiraSubtaskDirect } from './direct-functions/remove-subtask.js';
-import { analyzeTaskComplexityDirect, analyzeJiraComplexityDirect } from './direct-functions/analyze-task-complexity.js';
-import { clearSubtasksDirect, clearJiraSubtasksDirect } from './direct-functions/clear-subtasks.js';
-import { expandAllTasksDirect, expandAllJiraTasksDirect } from './direct-functions/expand-all-tasks.js';
-import { removeDependencyDirect, removeJiraDependencyDirect } from './direct-functions/remove-dependency.js';
-import { validateDependenciesDirect, validateJiraDependenciesDirect } from './direct-functions/validate-dependencies.js';
-import { fixDependenciesDirect, fixJiraDependenciesDirect } from './direct-functions/fix-dependencies.js';
+import {
+	setTaskStatusDirect,
+	setJiraTaskStatusDirect
+} from './direct-functions/set-task-status.js';
+import {
+	showTaskDirect,
+	showJiraTaskDirect
+} from './direct-functions/show-task.js';
+import {
+	nextTaskDirect,
+	nextJiraTaskDirect
+} from './direct-functions/next-task.js';
+import {
+	expandTaskDirect,
+	expandJiraTaskDirect
+} from './direct-functions/expand-task.js';
+import {
+	addTaskDirect,
+	addJiraTaskDirect
+} from './direct-functions/add-task.js';
+import {
+	addSubtaskDirect,
+	addJiraSubtaskDirect
+} from './direct-functions/add-subtask.js';
+import {
+	removeSubtaskDirect,
+	removeJiraSubtaskDirect
+} from './direct-functions/remove-subtask.js';
+import {
+	analyzeTaskComplexityDirect,
+	analyzeJiraComplexityDirect
+} from './direct-functions/analyze-task-complexity.js';
+import {
+	clearSubtasksDirect,
+	clearJiraSubtasksDirect
+} from './direct-functions/clear-subtasks.js';
+import {
+	expandAllTasksDirect,
+	expandAllJiraTasksDirect
+} from './direct-functions/expand-all-tasks.js';
+import {
+	removeDependencyDirect,
+	removeJiraDependencyDirect
+} from './direct-functions/remove-dependency.js';
+import {
+	validateDependenciesDirect,
+	validateJiraDependenciesDirect
+} from './direct-functions/validate-dependencies.js';
+import {
+	fixDependenciesDirect,
+	fixJiraDependenciesDirect
+} from './direct-functions/fix-dependencies.js';
 import { complexityReportDirect } from './direct-functions/complexity-report.js';
-import { addDependencyDirect, addJiraDependencyDirect } from './direct-functions/add-dependency.js';
-import { removeTaskDirect, removeJiraTaskDirect } from './direct-functions/remove-task.js';
+import {
+	addDependencyDirect,
+	addJiraDependencyDirect
+} from './direct-functions/add-dependency.js';
+import {
+	removeTaskDirect,
+	removeJiraTaskDirect
+} from './direct-functions/remove-task.js';
 import { initializeProjectDirect } from './direct-functions/initialize-project.js';
 import { modelsDirect } from './direct-functions/models.js';
 

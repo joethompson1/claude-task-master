@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { fixDependenciesDirect, fixJiraDependenciesDirect } from '../core/task-master-core.js';
+import {
+	fixDependenciesDirect,
+	fixJiraDependenciesDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -31,7 +34,7 @@ export function registerFixDependenciesTool(server) {
 			execute: withNormalizedProjectRoot(async (args, { log, session }) => {
 				try {
 					log.info(`Fixing dependencies with args: ${JSON.stringify(args)}`);
-	
+
 					// Use args.projectRoot directly (guaranteed by withNormalizedProjectRoot)
 					let tasksJsonPath;
 					try {
@@ -45,20 +48,20 @@ export function registerFixDependenciesTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					const result = await fixDependenciesDirect(
 						{
 							tasksJsonPath: tasksJsonPath
 						},
 						log
 					);
-	
+
 					if (result.success) {
 						log.info(`Successfully fixed dependencies: ${result.data.message}`);
 					} else {
 						log.error(`Failed to fix dependencies: ${result.error.message}`);
 					}
-	
+
 					return handleApiResult(result, log, 'Error fixing dependencies');
 				} catch (error) {
 					log.error(`Error in fixDependencies tool: ${error.message}`);
@@ -78,7 +81,9 @@ export function registerFixDependenciesTool(server) {
 			}),
 			execute: async (args, { log, session }) => {
 				try {
-					log.info(`Fixing Jira dependencies with args: ${JSON.stringify(args)}`);
+					log.info(
+						`Fixing Jira dependencies with args: ${JSON.stringify(args)}`
+					);
 
 					const result = await fixJiraDependenciesDirect(
 						{
@@ -89,9 +94,13 @@ export function registerFixDependenciesTool(server) {
 					);
 
 					if (result.success) {
-						log.info(`Successfully fixed Jira dependencies: ${result.data.message}`);
+						log.info(
+							`Successfully fixed Jira dependencies: ${result.data.message}`
+						);
 					} else {
-						log.error(`Failed to fix Jira dependencies: ${result.error.message}`);
+						log.error(
+							`Failed to fix Jira dependencies: ${result.error.message}`
+						);
 					}
 
 					return handleApiResult(result, log, 'Error fixing Jira dependencies');

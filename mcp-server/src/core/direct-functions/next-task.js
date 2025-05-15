@@ -152,15 +152,17 @@ export async function nextTaskDirect(args, log) {
 export async function nextJiraTaskDirect(args, log) {
 	try {
 		// Remove cache key creation and directly call the core function
-		log.info(`Finding next task from Jira ${args.parentKey ? `for parent ${args.parentKey}` : ''}`);
+		log.info(
+			`Finding next task from Jira ${args.parentKey ? `for parent ${args.parentKey}` : ''}`
+		);
 
 		// Enable silent mode to prevent console logs from interfering with JSON response
 		enableSilentMode();
-		
+
 		try {
 			// Call the findNextJiraTask function with parentKey if provided
 			const result = await findNextJiraTask(args.parentKey, log);
-			
+
 			if (!result.success) {
 				log.error(`Error finding next task: ${result.error.message}`);
 				return {
@@ -169,26 +171,31 @@ export async function nextJiraTaskDirect(args, log) {
 					fromCache: false
 				};
 			}
-			
+
 			// If no next task found
 			if (!result.data.nextTask) {
-				log.info('No eligible next task found. All tasks are either completed or have unsatisfied dependencies');
+				log.info(
+					'No eligible next task found. All tasks are either completed or have unsatisfied dependencies'
+				);
 				return {
 					success: true,
 					data: {
-						message: 'No eligible next task found. All tasks are either completed or have unsatisfied dependencies',
-						nextTask: null,
+						message:
+							'No eligible next task found. All tasks are either completed or have unsatisfied dependencies',
+						nextTask: null
 					},
 					fromCache: false
 				};
 			}
-			
+
 			// Return the next task data
-			log.info(`Successfully found next task ${result.data.nextTask.id}: ${result.data.nextTask.title}`);
+			log.info(
+				`Successfully found next task ${result.data.nextTask.id}: ${result.data.nextTask.title}`
+			);
 			return {
 				success: true,
 				data: {
-					nextTask: result.data.nextTask,
+					nextTask: result.data.nextTask
 				},
 				fromCache: false
 			};

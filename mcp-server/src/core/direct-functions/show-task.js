@@ -133,13 +133,17 @@ export async function showJiraTaskDirect(args, log) {
 		enableSilentMode();
 
 		log.info(`Retrieving task details for Jira issue: ${taskId}`);
-		
+
 		// Use the dedicated function from jira-utils.js to fetch task details
-		const jiraTaskResult = await fetchJiraTaskDetails(taskId, args.withSubtasks, log);
-		
+		const jiraTaskResult = await fetchJiraTaskDetails(
+			taskId,
+			args.withSubtasks,
+			log
+		);
+
 		// Restore normal logging before returning
 		disableSilentMode();
-		
+
 		// Return the result directly as it's already in the expected format
 		log.info(`showJiraTaskDirect completed for issue: ${taskId}`);
 		return jiraTaskResult;

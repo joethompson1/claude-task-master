@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { updateTaskByIdDirect, updateJiraTaskByIdDirect } from '../core/task-master-core.js';
+import {
+	updateTaskByIdDirect,
+	updateJiraTaskByIdDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -47,7 +50,7 @@ export function registerUpdateTaskTool(server) {
 					log.info(
 						`Executing ${toolName} tool with args: ${JSON.stringify(args)}`
 					);
-	
+
 					let tasksJsonPath;
 					try {
 						tasksJsonPath = findTasksJsonPath(
@@ -56,12 +59,14 @@ export function registerUpdateTaskTool(server) {
 						);
 						log.info(`${toolName}: Resolved tasks path: ${tasksJsonPath}`);
 					} catch (error) {
-						log.error(`${toolName}: Error finding tasks.json: ${error.message}`);
+						log.error(
+							`${toolName}: Error finding tasks.json: ${error.message}`
+						);
 						return createErrorResponse(
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					// 3. Call Direct Function - Include projectRoot
 					const result = await updateTaskByIdDirect(
 						{
@@ -74,7 +79,7 @@ export function registerUpdateTaskTool(server) {
 						log,
 						{ session }
 					);
-	
+
 					// 4. Handle Result
 					log.info(
 						`${toolName}: Direct function result: success=${result.success}`
@@ -98,9 +103,7 @@ export function registerUpdateTaskTool(server) {
 			parameters: z.object({
 				id: z
 					.string()
-					.describe(
-						"Jira issue key of the task to update (e.g., 'PROJ-123')."
-					),
+					.describe("Jira issue key of the task to update (e.g., 'PROJ-123')."),
 				prompt: z
 					.string()
 					.describe('New information or context to incorporate into the task'),

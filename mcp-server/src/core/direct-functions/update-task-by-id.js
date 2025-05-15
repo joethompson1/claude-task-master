@@ -180,7 +180,6 @@ export async function updateTaskByIdDirect(args, log, context = {}) {
 	}
 }
 
-
 /**
  * Direct function wrapper for updateTaskById with error handling.
  *
@@ -230,8 +229,7 @@ export async function updateJiraTaskByIdDirect(args, log, context = {}) {
 			if (id.includes('-')) {
 				taskId = id;
 			} else {
-				const errorMessage =
-				'Task ID must be in the format "PROJ-123"';
+				const errorMessage = 'Task ID must be in the format "PROJ-123"';
 				log.error(errorMessage);
 				return {
 					success: false,
@@ -277,11 +275,12 @@ export async function updateJiraTaskByIdDirect(args, log, context = {}) {
 
 			// Handle the case where the task couldn't be updated (e.g., already marked as done)
 			if (!result) {
-				throw new Error('Failed to update Jira task. It may be marked as completed, or another error occurred.');
+				throw new Error(
+					'Failed to update Jira task. It may be marked as completed, or another error occurred.'
+				);
 			}
 
 			return result;
-
 		} catch (error) {
 			log.error(`Error updating task by ID: ${error.message}`);
 			return {

@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { nextTaskDirect, nextJiraTaskDirect } from '../core/task-master-core.js';
+import {
+	nextTaskDirect,
+	nextJiraTaskDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -32,7 +35,7 @@ export function registerNextTaskTool(server) {
 			execute: withNormalizedProjectRoot(async (args, { log, session }) => {
 				try {
 					log.info(`Finding next task with args: ${JSON.stringify(args)}`);
-	
+
 					// Use args.projectRoot directly (guaranteed by withNormalizedProjectRoot)
 					let tasksJsonPath;
 					try {
@@ -46,14 +49,14 @@ export function registerNextTaskTool(server) {
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					const result = await nextTaskDirect(
 						{
 							tasksJsonPath: tasksJsonPath
 						},
 						log
 					);
-	
+
 					if (result.success) {
 						log.info(
 							`Successfully found next task: ${result.data?.task?.id || 'No available tasks'}`
@@ -63,7 +66,7 @@ export function registerNextTaskTool(server) {
 							`Failed to find next task: ${result.error?.message || 'Unknown error'}`
 						);
 					}
-	
+
 					return handleApiResult(result, log, 'Error finding next task');
 				} catch (error) {
 					log.error(`Error in nextTask tool: ${error.message}`);
@@ -79,7 +82,9 @@ export function registerNextTaskTool(server) {
 			parameters: z.object({
 				parentKey: z
 					.string()
-					.describe('Parent Jira issue key (epic or task with subtasks) to filter tasks by, if no parent key is provided, pass in "all" as the parameter'),
+					.describe(
+						'Parent Jira issue key (epic or task with subtasks) to filter tasks by, if no parent key is provided, pass in "all" as the parameter'
+					)
 			}),
 			execute: async (args, { log, session }) => {
 				try {
@@ -87,14 +92,14 @@ export function registerNextTaskTool(server) {
 
 					// Check if parentKey is 'all' and set to null to fetch all tasks
 					const parentKey = args.parentKey === 'all' ? null : args.parentKey;
-					
+
 					const result = await nextJiraTaskDirect(
 						{
-							parentKey: parentKey,
-						}, 
+							parentKey: parentKey
+						},
 						log
 					);
-	
+
 					if (result.success) {
 						log.info(
 							`Successfully found next task: ${result.data?.nextTask?.id || 'No available tasks'}`
@@ -104,13 +109,13 @@ export function registerNextTaskTool(server) {
 							`Failed to find next task: ${result.error?.message || 'Unknown error'}`
 						);
 					}
-	
+
 					return handleApiResult(result, log, 'Error finding next task');
 				} catch (error) {
 					log.error(`Error in nextTask tool: ${error.message}`);
 					return createErrorResponse(error.message);
 				}
 			}
-		});	
+		});
 	}
 }

@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { updateSubtaskByIdDirect, updateJiraSubtaskByIdDirect } from '../core/task-master-core.js';
+import {
+	updateSubtaskByIdDirect,
+	updateJiraSubtaskByIdDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -43,7 +46,7 @@ export function registerUpdateSubtaskTool(server) {
 				const toolName = 'update_subtask';
 				try {
 					log.info(`Updating subtask with args: ${JSON.stringify(args)}`);
-	
+
 					let tasksJsonPath;
 					try {
 						tasksJsonPath = findTasksJsonPath(
@@ -51,12 +54,14 @@ export function registerUpdateSubtaskTool(server) {
 							log
 						);
 					} catch (error) {
-						log.error(`${toolName}: Error finding tasks.json: ${error.message}`);
+						log.error(
+							`${toolName}: Error finding tasks.json: ${error.message}`
+						);
 						return createErrorResponse(
 							`Failed to find tasks.json: ${error.message}`
 						);
 					}
-	
+
 					const result = await updateSubtaskByIdDirect(
 						{
 							tasksJsonPath: tasksJsonPath,
@@ -68,7 +73,7 @@ export function registerUpdateSubtaskTool(server) {
 						log,
 						{ session }
 					);
-	
+
 					if (result.success) {
 						log.info(`Successfully updated subtask with ID ${args.id}`);
 					} else {
@@ -76,7 +81,7 @@ export function registerUpdateSubtaskTool(server) {
 							`Failed to update subtask: ${result.error?.message || 'Unknown error'}`
 						);
 					}
-	
+
 					return handleApiResult(result, log, 'Error updating subtask');
 				} catch (error) {
 					log.error(
@@ -99,7 +104,11 @@ export function registerUpdateSubtaskTool(server) {
 					.describe(
 						"Jira issue key of the subtask to update (e.g., 'PROJ-123')."
 					),
-				prompt: z.string().describe('A prompt describing the changes to make to a Jira subtask (Be very detailed about which fields of the subtask need to be updated and what changes should be made)'),
+				prompt: z
+					.string()
+					.describe(
+						'A prompt describing the changes to make to a Jira subtask (Be very detailed about which fields of the subtask need to be updated and what changes should be made)'
+					),
 				research: z
 					.boolean()
 					.optional()

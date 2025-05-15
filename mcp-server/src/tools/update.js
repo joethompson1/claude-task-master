@@ -9,7 +9,10 @@ import {
 	createErrorResponse,
 	withNormalizedProjectRoot
 } from './utils.js';
-import { updateTasksDirect, updateJiraTasksDirect } from '../core/task-master-core.js';
+import {
+	updateTasksDirect,
+	updateJiraTasksDirect
+} from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
@@ -50,23 +53,25 @@ export function registerUpdateTool(server) {
 			execute: withNormalizedProjectRoot(async (args, { log, session }) => {
 				const toolName = 'update';
 				const { from, prompt, research, file, projectRoot } = args;
-	
+
 				try {
 					log.info(
 						`Executing ${toolName} tool with normalized root: ${projectRoot}`
 					);
-	
+
 					let tasksJsonPath;
 					try {
 						tasksJsonPath = findTasksJsonPath({ projectRoot, file }, log);
 						log.info(`${toolName}: Resolved tasks path: ${tasksJsonPath}`);
 					} catch (error) {
-						log.error(`${toolName}: Error finding tasks.json: ${error.message}`);
+						log.error(
+							`${toolName}: Error finding tasks.json: ${error.message}`
+						);
 						return createErrorResponse(
 							`Failed to find tasks.json within project root '${projectRoot}': ${error.message}`
 						);
 					}
-	
+
 					const result = await updateTasksDirect(
 						{
 							tasksJsonPath: tasksJsonPath,
@@ -78,7 +83,7 @@ export function registerUpdateTool(server) {
 						log,
 						{ session }
 					);
-	
+
 					log.info(
 						`${toolName}: Direct function result: success=${result.success}`
 					);
@@ -106,15 +111,19 @@ export function registerUpdateTool(server) {
 					),
 				prompt: z
 					.string()
-					.describe('A prompt describing the changes to make to Jira tasks (Be very detailed about which fields of the task need to be updated and what changes should be made)'),
+					.describe(
+						'A prompt describing the changes to make to Jira tasks (Be very detailed about which fields of the task need to be updated and what changes should be made)'
+					),
 				research: z
 					.boolean()
 					.optional()
-					.describe('Use Perplexity AI for research-backed updates'),
+					.describe('Use Perplexity AI for research-backed updates')
 			}),
 			execute: async (args, { log, session }) => {
 				try {
-					log.info(`Updating specific Jira tasks with args: ${JSON.stringify(args)}`);
+					log.info(
+						`Updating specific Jira tasks with args: ${JSON.stringify(args)}`
+					);
 
 					// For Jira tasks, we don't need to resolve tasks.json path
 					// Instead, we'll directly call the Jira API
