@@ -514,4 +514,82 @@ export class JiraClient {
 			);
 		}
 	}
+
+	/**
+	 * Add a comment to a Jira issue
+	 * @param {string} issueKey - Key of the issue to add a comment to
+	 * @param {string} commentText - Text content of the comment to add
+	 * @param {Object} [options] - Additional options
+	 * @param {Object} [options.log] - Logger object
+	 * @returns {Promise<Object>} - Result with success status and comment data/error
+	 */
+	async addComment(issueKey, commentText, options = {}) {
+		const log = options.log || console;
+
+		try {
+			if (!this.isReady()) {
+				return this.createErrorResponse(
+					'JIRA_NOT_ENABLED',
+					'Jira integration is not properly configured'
+				);
+			}
+
+			if (!issueKey) {
+				return this.createErrorResponse(
+					'JIRA_INVALID_INPUT',
+					'Issue key is required'
+				);
+			}
+
+			if (!commentText) {
+				return this.createErrorResponse(
+					'JIRA_INVALID_INPUT',
+					'Comment text is required'
+				);
+			}
+
+			log.info?.(`Adding comment to Jira issue ${issueKey}`);
+
+			const client = this.getClient();
+			const response = await client.post(
+				`/rest/api/3/issue/${issueKey}/comment`,
+				{
+					body: {
+						type: 'doc',
+						version: 1,
+						content: [
+							{
+								type: 'paragraph',
+								content: [
+									{
+										type: 'text',
+										text: commentText
+									}
+								]
+							}
+						]
+					}
+				}
+			);
+
+			if (!response.data) {
+				return this.createErrorResponse(
+					'JIRA_INVALID_RESPONSE',
+					'Invalid response from Jira API'
+				);
+			}
+
+			return {
+				success: true,
+				data: response.data
+			};
+		} catch (error) {
+			log.error?.(`Error adding comment to Jira issue: ${error.message}`);
+			return this.createErrorResponse(
+				'JIRA_REQUEST_ERROR',
+				`Failed to add comment: ${error.message}`,
+				error.response?.data
+			);
+		}
+	}
 }

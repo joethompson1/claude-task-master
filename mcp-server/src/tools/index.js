@@ -28,6 +28,7 @@ import { registerAddDependencyTool } from './add-dependency.js';
 import { registerRemoveTaskTool } from './remove-task.js';
 import { registerInitializeProjectTool } from './initialize-project.js';
 import { registerModelsTool } from './models.js';
+import { registerAddJiraCommentTool } from './add-jira-comment.js';
 
 /**
  * Register all Task Master tools with the MCP server
@@ -61,6 +62,7 @@ export function registerTaskMasterTools(server) {
 		registerRemoveTaskTool(server);
 		registerRemoveSubtaskTool(server);
 		registerClearSubtasksTool(server);
+		registerAddJiraCommentTool(server);
 
 		// Group 5: Task Analysis & Expansion
 		registerAnalyzeProjectComplexityTool(server);

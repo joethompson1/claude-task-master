@@ -87,6 +87,7 @@ import {
 } from './direct-functions/remove-task.js';
 import { initializeProjectDirect } from './direct-functions/initialize-project.js';
 import { modelsDirect } from './direct-functions/models.js';
+import { addJiraCommentDirect } from './direct-functions/add-comment.js';
 
 // Re-export utility functions
 export { findTasksJsonPath } from './utils/path-utils.js';
@@ -136,7 +137,8 @@ export const directFunctions = new Map([
 	['removeTaskDirect', removeTaskDirect],
 	['removeJiraTaskDirect', removeJiraTaskDirect],
 	['initializeProjectDirect', initializeProjectDirect],
-	['modelsDirect', modelsDirect]
+	['modelsDirect', modelsDirect],
+	['addJiraCommentDirect', addJiraCommentDirect]
 ]);
 
 // Re-export all direct function implementations
@@ -184,5 +186,6 @@ export {
 	removeTaskDirect,
 	removeJiraTaskDirect,
 	initializeProjectDirect,
-	modelsDirect
+	modelsDirect,
+	addJiraCommentDirect
 };
