@@ -491,11 +491,6 @@ function registerCommands(programInstance) {
 		process.exit(1);
 	});
 
-	// Default help
-	programInstance.on('--help', function () {
-		displayHelp();
-	});
-
 	// parse-prd command
 	programInstance
 		.command('parse-prd')
@@ -532,6 +527,26 @@ function registerCommands(programInstance) {
 		.action(async (file, options) => {
 			const isJiraEnabled = JiraClient.isJiraEnabled();
 			const numTasks = parseInt(options.numTasks, 10);
+			const outputPath = options.output;
+			const force = options.force || false;
+			const append = options.append || false;
+			let useForce = force;
+			let useAppend = false;
+
+			// Helper function to check if tasks.json exists and confirm overwrite
+			async function confirmOverwriteIfNeeded() {
+				if (fs.existsSync(outputPath) && !useForce && !useAppend) {
+					const overwrite = await confirmTaskOverwrite(outputPath);
+					if (!overwrite) {
+						log('info', 'Operation cancelled.');
+						return false;
+					}
+					// If user confirms 'y', we should set useForce = true for the parsePRD call
+					// Only overwrite if not appending
+					useForce = true;
+				}
+				return true;
+			}
 
 			if (isJiraEnabled) {
 				// Jira mode
@@ -3938,14 +3953,7 @@ function setupCLI() {
 			return 'unknown'; // Default fallback
 		})
 		.helpOption('-h, --help', 'Display help')
-		.addHelpCommand(false) // Disable default help command
-		.on('--help', () => {
-			displayHelp(); // Use your custom help display instead
-		})
-		.on('-h', () => {
-			displayHelp();
-			process.exit(0);
-		});
+		.addHelpCommand(false); // Disable default help command
 
 	// Modify the help option to use your custom display
 	programInstance.helpInformation = () => {
