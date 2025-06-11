@@ -7,6 +7,7 @@
 
 import axios from 'axios';
 import { JiraTicket } from './jira-ticket.js';
+import { compressImageIfNeeded } from './jira-utils.js';
 
 /**
  * JiraClient class for interacting with Jira API
@@ -201,12 +202,14 @@ export class JiraClient {
 	 * @param {string} issueKey - Jira issue key to fetch
 	 * @param {Object} [options] - Additional options
 	 * @param {boolean} [options.expand=true] - Whether to expand fields like renderedFields
+	 * @param {boolean} [options.includeImages=true] - Whether to fetch and include image attachments
 	 * @param {Object} [options.log] - Logger object
 	 * @returns {Promise<{success: boolean, data: JiraTicket, error: Object}>} - Result with success status and issue data/error
 	 */
 	async fetchIssue(issueKey, options = {}) {
 		const log = options.log || console;
 		const expand = options.expand !== undefined ? options.expand : true;
+		const includeImages = options.includeImages !== undefined ? options.includeImages : true;
 
 		try {
 			if (!this.isReady()) {
@@ -216,13 +219,13 @@ export class JiraClient {
 				);
 			}
 
-			log.info?.(`Fetching Jira issue with key: ${issueKey}`);
+			log.info?.(`Fetching Jira issue with key: ${issueKey}${includeImages === false ? ' (excluding images)' : ''}`);
 
 			const client = this.getClient();
 			const response = await client.get(`/rest/api/3/issue/${issueKey}`, {
 				params: {
 					fields:
-						'summary,description,status,priority,issuetype,parent,issuelinks,subtasks',
+						'summary,description,status,priority,issuetype,parent,issuelinks,subtasks,attachment',
 					...(expand ? { expand: 'renderedFields' } : {})
 				}
 			});
@@ -234,9 +237,55 @@ export class JiraClient {
 				);
 			}
 
+			const jiraTicket = await JiraTicket.fromJiraIssue(response.data);
+
+			// Conditionally fetch image attachments if they exist and includeImages is true
+			if (includeImages && jiraTicket.attachments && jiraTicket.attachments.length > 0) {
+				log.info?.(`Found ${jiraTicket.attachments.length} attachments, checking for images...`);
+
+				// Extract attachment IDs for image attachments only
+				const imageAttachments = jiraTicket.attachments.filter(att => 
+					att.mimeType && att.mimeType.startsWith('image/')
+				);
+
+				if (imageAttachments.length > 0) {
+					log.info?.(`Fetching ${imageAttachments.length} image attachments as base64...`);
+					
+					const attachmentIds = imageAttachments.map(att => att.id);
+					
+					// Fetch attachment images as base64
+					const attachmentsResult = await this.fetchAttachmentsAsBase64(attachmentIds, { 
+						log, 
+						thumbnail: false, // Use full images, not thumbnails
+						compress: true, // Enable compression for MCP injection
+						imageTypes: ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp', 'image/svg+xml'],
+						attachmentMetadata: imageAttachments // Pass the attachment metadata
+					});
+
+					if (attachmentsResult.success) {
+						// Add base64 data to the ticket
+						jiraTicket.attachmentImages = attachmentsResult.data.attachments;
+						jiraTicket.attachmentImageStats = {
+							totalAttachments: jiraTicket.attachments.length,
+							totalImages: attachmentsResult.data.totalFetched,
+							totalErrors: attachmentsResult.data.totalErrors,
+							isThumbnail: false
+						};
+
+						if (attachmentsResult.data.errors.length > 0) {
+							log.warn?.(`Failed to fetch ${attachmentsResult.data.errors.length} attachment images`);
+						} else {
+							log.info?.(`Successfully fetched ${attachmentsResult.data.totalFetched} image attachments`);
+						}
+					} else {
+						log.error?.(`Failed to fetch attachment images: ${attachmentsResult.error?.message}`);
+					}
+				}
+			}
+
 			return {
 				success: true,
-				data: await JiraTicket.fromJiraIssue(response.data)
+				data: jiraTicket
 			};
 		} catch (error) {
 			log.error?.(`Error fetching Jira issue: ${error.message}`);
@@ -278,7 +327,7 @@ export class JiraClient {
 					jql,
 					maxResults,
 					fields:
-						'summary,description,status,priority,issuetype,parent,issuelinks,subtasks',
+						'summary,description,status,priority,issuetype,parent,issuelinks,subtasks,attachment',
 					...(expand ? { expand: 'renderedFields' } : {})
 				}
 			});
@@ -588,6 +637,193 @@ export class JiraClient {
 			return this.createErrorResponse(
 				'JIRA_REQUEST_ERROR',
 				`Failed to add comment: ${error.message}`,
+				error.response?.data
+			);
+		}
+	}
+
+	/**
+	 * Fetch attachment content as base64 for MCP image injection
+	 * @param {string} attachmentId - The attachment ID
+	 * @param {Object} [options] - Additional options
+	 * @param {Object} [options.log] - Logger object
+	 * @param {boolean} [options.thumbnail=false] - Whether to fetch thumbnail instead of full content
+	 * @returns {Promise<Object>} - Result with success status and base64 data/error
+	 */
+	async fetchAttachmentAsBase64(attachmentId, options = {}) {
+		const log = options.log || console;
+		const thumbnail = options.thumbnail || false;
+		const compress = options.compress !== undefined ? options.compress : true; // Default to compress
+
+		try {
+			if (!this.isReady()) {
+				return this.createErrorResponse(
+					'JIRA_NOT_ENABLED',
+					'Jira integration is not properly configured'
+				);
+			}
+
+			if (!attachmentId) {
+				return this.createErrorResponse(
+					'JIRA_INVALID_INPUT',
+					'Attachment ID is required'
+				);
+			}
+
+			log.info?.(`Fetching attachment ${attachmentId} as base64 (thumbnail: ${thumbnail}, compress: ${compress})`);
+
+			const client = this.getClient();
+			const endpoint = thumbnail 
+				? `/rest/api/3/attachment/thumbnail/${attachmentId}`
+				: `/rest/api/3/attachment/content/${attachmentId}`;
+
+			const response = await client.get(endpoint, {
+				responseType: 'arraybuffer'
+			});
+
+			if (!response.data) {
+				return this.createErrorResponse(
+					'JIRA_INVALID_RESPONSE',
+					'No attachment data received from Jira API'
+				);
+			}
+
+			// Convert binary data to base64
+			let base64Data = Buffer.from(response.data, 'binary').toString('base64');
+			
+			// Get MIME type from response headers
+			let mimeType = response.headers['content-type'] || 'application/octet-stream';
+			let originalSize = response.data.byteLength;
+			let compressedSize = originalSize;
+
+			// Apply compression if requested and it's an image
+			if (compress && mimeType.startsWith('image/')) {
+				log.info?.('Compressing image for MCP injection...');
+				const compressionResult = await compressImageIfNeeded(base64Data, mimeType, log);
+				base64Data = compressionResult.base64;
+				mimeType = compressionResult.mimeType;
+				compressedSize = compressionResult.compressedSize;
+				
+				log.info?.(`Image compression complete. Original: ${originalSize} bytes, Compressed: ${compressedSize} bytes`);
+			}
+
+			return {
+				success: true,
+				data: {
+					base64: base64Data,
+					mimeType: mimeType,
+					size: compressedSize,
+					originalSize: originalSize,
+					attachmentId: attachmentId,
+					isThumbnail: thumbnail,
+					compressed: compress && mimeType.startsWith('image/') && compressedSize < originalSize
+				}
+			};
+		} catch (error) {
+			log.error?.(`Error fetching attachment as base64: ${error.message}`);
+			return this.createErrorResponse(
+				'JIRA_REQUEST_ERROR',
+				`Failed to fetch attachment: ${error.message}`,
+				error.response?.data
+			);
+		}
+	}
+
+	/**
+	 * Fetch multiple attachments as base64 for MCP image injection
+	 * @param {Array<string>} attachmentIds - Array of attachment IDs
+	 * @param {Object} [options] - Additional options
+	 * @param {Object} [options.log] - Logger object
+	 * @param {boolean} [options.thumbnail=false] - Whether to fetch thumbnails instead of full content
+	 * @param {boolean} [options.compress=true] - Whether to compress images for MCP injection
+	 * @param {Array<string>} [options.imageTypes] - Array of MIME types to filter for images only
+	 * @param {Array<Object>} [options.attachmentMetadata] - Array of attachment metadata objects with filename, etc.
+	 * @returns {Promise<Object>} - Result with success status and array of base64 data/error
+	 */
+	async fetchAttachmentsAsBase64(attachmentIds, options = {}) {
+		const log = options.log || console;
+		const thumbnail = options.thumbnail || false;
+		const compress = options.compress !== undefined ? options.compress : true; // Default to compress
+		const attachmentMetadata = options.attachmentMetadata || [];
+		const imageTypes = options.imageTypes || [
+			'image/jpeg',
+			'image/jpg', 
+			'image/png',
+			'image/gif',
+			'image/bmp',
+			'image/webp',
+			'image/svg+xml'
+		];
+
+		try {
+			if (!this.isReady()) {
+				return this.createErrorResponse(
+					'JIRA_NOT_ENABLED',
+					'Jira integration is not properly configured'
+				);
+			}
+
+			if (!Array.isArray(attachmentIds) || attachmentIds.length === 0) {
+				return this.createErrorResponse(
+					'JIRA_INVALID_INPUT',
+					'Attachment IDs array is required and must not be empty'
+				);
+			}
+
+			log.info?.(`Fetching ${attachmentIds.length} attachments as base64 (thumbnail: ${thumbnail}, compress: ${compress})`);
+
+			const results = [];
+			const errors = [];
+
+			// Process attachments sequentially to avoid overwhelming the API
+			for (const attachmentId of attachmentIds) {
+				try {
+					const result = await this.fetchAttachmentAsBase64(attachmentId, { log, thumbnail, compress });
+					
+					if (result.success) {
+						// Filter for images only if imageTypes is specified
+						if (imageTypes.length === 0 || imageTypes.includes(result.data.mimeType)) {
+							// Find metadata for this attachment and add filename if available
+							const metadata = attachmentMetadata.find(meta => meta.id === attachmentId);
+							if (metadata && metadata.filename) {
+								result.data.filename = metadata.filename;
+							}
+							results.push(result.data);
+						} else {
+							log.info?.(`Skipping non-image attachment ${attachmentId} with MIME type ${result.data.mimeType}`);
+						}
+					} else {
+						errors.push({
+							attachmentId,
+							error: result.error
+						});
+					}
+				} catch (error) {
+					errors.push({
+						attachmentId,
+						error: {
+							code: 'ATTACHMENT_FETCH_ERROR',
+							message: error.message
+						}
+					});
+				}
+			}
+
+			return {
+				success: true,
+				data: {
+					attachments: results,
+					errors: errors,
+					totalRequested: attachmentIds.length,
+					totalFetched: results.length,
+					totalErrors: errors.length
+				}
+			};
+		} catch (error) {
+			log.error?.(`Error fetching multiple attachments as base64: ${error.message}`);
+			return this.createErrorResponse(
+				'JIRA_REQUEST_ERROR',
+				`Failed to fetch attachments: ${error.message}`,
 				error.response?.data
 			);
 		}

@@ -108,12 +108,13 @@ export async function showTaskDirect(args, log) {
  * @param {Object} args - Command arguments
  * @param {string} args.id - The Jira issue key to show details for.
  * @param {boolean} [args.withSubtasks=false] - If true, will fetch subtasks for the parent task
+ * @param {boolean} [args.includeImages=true] - If true, will fetch and include image attachments
  * @param {Object} log - Logger object
  * @returns {Promise<Object>} - Task details result { success: boolean, data?: any, error?: { code: string, message: string } }
  */
 export async function showJiraTaskDirect(args, log) {
 	// Destructure expected args
-	const { id } = args;
+	const { id, includeImages = true } = args;
 
 	// Validate task ID
 	const taskId = id;
@@ -132,13 +133,14 @@ export async function showJiraTaskDirect(args, log) {
 		// Enable silent mode to prevent console logs from interfering with JSON response
 		enableSilentMode();
 
-		log.info(`Retrieving task details for Jira issue: ${taskId}`);
+		log.info(`Retrieving task details for Jira issue: ${taskId}${includeImages === false ? ' (excluding images)' : ''}`);
 
 		// Use the dedicated function from jira-utils.js to fetch task details
 		const jiraTaskResult = await fetchJiraTaskDetails(
 			taskId,
 			args.withSubtasks,
-			log
+			log,
+			{ includeImages }
 		);
 
 		// Restore normal logging before returning

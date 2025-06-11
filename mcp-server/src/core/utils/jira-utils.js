@@ -4,7 +4,6 @@
  */
 import { generateTextService } from '../../../../scripts/modules/ai-services-unified.js';
 import { isSilentMode, log } from '../../../../scripts/modules/utils.js';
-import { getDebugFlag } from '../../../../scripts/modules/config-manager.js';
 import {
 	startLoadingIndicator,
 	stopLoadingIndicator
@@ -12,16 +11,22 @@ import {
 import { JiraTicket } from './jira-ticket.js';
 import { JiraClient } from './jira-client.js';
 import { Anthropic } from '@anthropic-ai/sdk';
+import sharp from 'sharp';
 
 /**
  * Fetch a single Jira task details by its key
  * @param {string} taskId - Jira issue key to fetch
  * @param {boolean} [withSubtasks=false] - If true, will fetch subtasks for the parent task
  * @param {Object} log - Logger object
- * @returns {Promise<Object>} - Task details in Task Master format with allTasks array
+ * @param {Object} [options={}] - Additional options
+ * @param {boolean} [options.includeImages=true] - Whether to fetch and include image attachments
+ * @returns {Promise<Object>} - Task details in Task Master format with allTasks array and any image attachments as base64
  */
-export async function fetchJiraTaskDetails(taskId, withSubtasks = false, log) {
+export async function fetchJiraTaskDetails(taskId, withSubtasks = false, log, options = {}) {
 	try {
+		// Extract options with defaults
+		const { includeImages = true } = options;
+
 		// Check if Jira is enabled using the JiraClient
 		const jiraClient = new JiraClient();
 
@@ -35,12 +40,13 @@ export async function fetchJiraTaskDetails(taskId, withSubtasks = false, log) {
 			};
 		}
 
-		log.info(`Fetching Jira task details for key: ${taskId}`);
+		log.info(`Fetching Jira task details for key: ${taskId}${includeImages === false ? ' (excluding images)' : ''}`);
 
-		// Use the JiraClient's fetchIssue method
+		// Fetch the issue with conditional image fetching
 		const issueResult = await jiraClient.fetchIssue(taskId, {
 			log,
-			expand: true
+			expand: true,
+			includeImages
 		});
 
 		if (!issueResult.success) {
@@ -83,13 +89,16 @@ export async function fetchJiraTaskDetails(taskId, withSubtasks = false, log) {
 			allTasks.push(...subtasksData.tasks);
 		}
 
-		log.info(`Successfully found Jira task ${taskId}`);
+		// Prepare response data
+		const responseData = {
+			task: task,
+			allTasks: allTasks,
+			images: includeImages ? (issue.attachmentImages || []) : []
+		};
+
 		return {
 			success: true,
-			data: {
-				task: task,
-				allTasks: allTasks
-			}
+			data: responseData
 		};
 	} catch (error) {
 		log.error(`Error fetching Jira task details: ${error.message}`);
@@ -114,6 +123,37 @@ export async function fetchJiraTaskDetails(taskId, withSubtasks = false, log) {
 			}
 		};
 	}
+}
+
+/**
+ * Create MCP-compatible content response with images
+ * @param {Object} taskData - Task data from fetchJiraTaskDetails
+ * @param {string} [textContent] - Optional text content to include
+ * @returns {Array} - MCP content array with text and images
+ */
+export function createMCPContentWithImages(taskData, textContent = null) {
+	const content = [];
+
+	// Add text content if provided
+	if (textContent) {
+		content.push({
+			type: 'text',
+			text: textContent
+		});
+	}
+
+	// Add images if available
+	if (taskData.images && taskData.images.length > 0) {
+		for (const image of taskData.images) {
+			content.push({
+				type: 'image',
+				data: image.data,
+				mimeType: image.mimeType
+			});
+		}
+	}
+
+	return content;
 }
 
 /**
@@ -2138,4 +2178,108 @@ function parseSubtasksFromText(text, startId, expectedCount, parentTaskId) {
 	});
 
 	return subtasks;
+}
+
+
+/**
+ * Compress image to ensure it's under 1MB for MCP image injection
+ * @param {string} base64Data - Base64 encoded image data
+ * @param {string} mimeType - Original MIME type of the image
+ * @param {Object} log - Logger object
+ * @returns {Promise<{base64: string, mimeType: string, originalSize: number, compressedSize: number}>}
+ */
+export async function compressImageIfNeeded(base64Data, mimeType, log) {
+	const MAX_SIZE_BYTES = 1048576; // 1MB in bytes
+	
+	try {
+		// Convert base64 to buffer
+		const originalBuffer = Buffer.from(base64Data, 'base64');
+		const originalSize = originalBuffer.length;
+		
+		log?.info(`Original image size: ${originalSize} bytes (${(originalSize / 1024 / 1024).toFixed(2)} MB)`);
+		
+		// If already under 1MB, return as is
+		if (originalSize <= MAX_SIZE_BYTES) {
+			log?.info('Image is already under 1MB, no compression needed');
+			return {
+				base64: base64Data,
+				mimeType: mimeType,
+				originalSize: originalSize,
+				compressedSize: originalSize
+			};
+		}
+		
+		log?.info('Image exceeds 1MB, compressing...');
+		
+		// Start with quality 80% and reduce if needed
+		let quality = 80;
+		let compressedBuffer;
+		let finalMimeType = 'image/jpeg'; // Convert to JPEG for better compression
+		
+		do {
+			const sharpInstance = sharp(originalBuffer);
+			
+			// Convert to JPEG with specified quality
+			compressedBuffer = await sharpInstance
+				.jpeg({ quality: quality, progressive: true })
+				.toBuffer();
+			
+			log?.info(`Compressed with quality ${quality}%: ${compressedBuffer.length} bytes`);
+			
+			// Reduce quality if still too large
+			if (compressedBuffer.length > MAX_SIZE_BYTES && quality > 10) {
+				quality -= 10;
+			} else {
+				break;
+			}
+		} while (compressedBuffer.length > MAX_SIZE_BYTES && quality >= 10);
+		
+		// If still too large, try resizing
+		if (compressedBuffer.length > MAX_SIZE_BYTES) {
+			log?.info('Still too large after quality reduction, trying resize...');
+			
+			const sharpInstance = sharp(originalBuffer);
+			const metadata = await sharpInstance.metadata();
+			
+			// Reduce dimensions by 20% at a time
+			let scale = 0.8;
+			do {
+				const newWidth = Math.floor(metadata.width * scale);
+				const newHeight = Math.floor(metadata.height * scale);
+				
+				compressedBuffer = await sharp(originalBuffer)
+					.resize(newWidth, newHeight)
+					.jpeg({ quality: 70, progressive: true })
+					.toBuffer();
+				
+				log?.info(`Resized to ${newWidth}x${newHeight}: ${compressedBuffer.length} bytes`);
+				
+				scale -= 0.1;
+			} while (compressedBuffer.length > MAX_SIZE_BYTES && scale > 0.3);
+		}
+		
+		const compressedBase64 = compressedBuffer.toString('base64');
+		const compressedSize = compressedBuffer.length;
+		
+		log?.info(`Final compressed size: ${compressedSize} bytes (${(compressedSize / 1024 / 1024).toFixed(2)} MB)`);
+		log?.info(`Compression ratio: ${((1 - compressedSize / originalSize) * 100).toFixed(1)}%`);
+		
+		return {
+			base64: compressedBase64,
+			mimeType: finalMimeType,
+			originalSize: originalSize,
+			compressedSize: compressedSize
+		};
+		
+	} catch (error) {
+		log?.error(`Error compressing image: ${error.message}`);
+		// Return original image if compression fails
+		return {
+			base64: base64Data,
+			mimeType: mimeType,
+			originalSize: Buffer.from(base64Data, 'base64').length,
+			compressedSize: Buffer.from(base64Data, 'base64').length,
+			compressionFailed: true
+		};
+	}
 }

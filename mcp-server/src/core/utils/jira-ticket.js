@@ -29,6 +29,7 @@ export class JiraTicket {
 	 * @param {string} [data.assignee] - Assignee account ID
 	 * @param {string} [data.jiraKey] - Existing Jira key (for updates)
 	 * @param {string} [data.status] - Ticket status
+	 * @param {Array<Object>} [data.attachments=[]] - Array of attachment objects
 	 */
 	constructor(data = {}) {
 		this.title = data.title || '';
@@ -46,6 +47,7 @@ export class JiraTicket {
 		this.jiraKey = data.jiraKey || '';
 		this.dependencies = data.dependencies || [];
 		this.status = data.status || '';
+		this.attachments = data.attachments || [];
 	}
 
 	/**
@@ -124,6 +126,12 @@ export class JiraTicket {
 
 		if (data.status !== undefined) {
 			this.status = data.status;
+		}
+
+		if (data.attachments !== undefined) {
+			this.attachments = Array.isArray(data.attachments)
+				? data.attachments
+				: [];
 		}
 
 		return this;
@@ -550,7 +558,8 @@ export class JiraTicket {
 			status: JiraTicket.convertJiraStatusToTaskMaster(this.status),
 			dependencies: this.dependencies,
 			jiraKey: this.jiraKey,
-			parentKey: this.parentKey
+			parentKey: this.parentKey,
+			attachments: this.attachments
 		};
 	}
 
@@ -842,7 +851,8 @@ export class JiraTicket {
 			jiraKey: jiraIssue.key,
 			status: jiraIssue.fields?.status?.name || '',
 			dependencies: dependencies,
-			labels: jiraIssue.fields?.labels || []
+			labels: jiraIssue.fields?.labels || [],
+			attachments: jiraIssue.fields?.attachment || []
 		});
 
 		// Update ticket with panel data if available

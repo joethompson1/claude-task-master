@@ -131,7 +131,12 @@ export function registerShowTaskTool(server) {
 					.boolean()
 					.optional()
 					.default(false)
-					.describe('If true, will fetch subtasks for the parent task')
+					.describe('If true, will fetch subtasks for the parent task'),
+				includeImages: z
+					.boolean()
+					.optional()
+					.default(true)
+					.describe('If true, will fetch and include image attachments (default: true)')
 			}),
 			execute: async (args, { log, session }) => {
 				// Log the session right at the start of execute
@@ -140,32 +145,49 @@ export function registerShowTaskTool(server) {
 				); // Use JSON.stringify for better visibility
 
 				try {
-					log.info(`Getting Jira task details for ID: ${args.id}`);
+					log.info(`Getting Jira task details for ID: ${args.id}${args.includeImages === false ? ' (excluding images)' : ''}`);
 
 					const result = await showJiraTaskDirect(
 						{
 							// Only need to pass the ID for Jira tasks
 							id: args.id,
-							withSubtasks: args.withSubtasks
+							withSubtasks: args.withSubtasks,
+							includeImages: args.includeImages
 						},
 						log
 					);
 
-					if (result.success) {
-						log.info(
-							`Successfully retrieved Jira task details for ID: ${args.id}${result.fromCache ? ' (from cache)' : ''}`
-						);
-					} else {
-						log.error(`Failed to get Jira task: ${result.error.message}`);
+					const content = [];
+					content.push({
+						type: 'text',
+						text: typeof result.data.task === 'object'
+							? // Format JSON nicely with indentation
+								JSON.stringify(result.data.task, null, 2)
+							: // Keep other content types as-is
+								String(result.data.task)
+					});
+
+					// Add each image to the content array (only if images were fetched)
+					if (result.data.images && result.data.images.length > 0) {
+						for (let i = 0; i < result.data.images.length; i++) {
+							const imageData = result.data.images[i];
+
+							// Add image description - filename should now be directly on imageData
+							content.push({
+								type: 'text',
+								text: `Image ${i + 1}: ${imageData.filename || 'Unknown filename'} (${imageData.mimeType}, ${Math.round(imageData.size / 1024)}KB${imageData.isThumbnail ? ', thumbnail' : ''})`
+							});
+
+							// Add the actual image
+							content.push({
+								type: 'image',
+								data: imageData.base64,
+								mimeType: imageData.mimeType
+							});
+						}
 					}
 
-					// Use our custom processor function to remove allTasks from the response
-					return handleApiResult(
-						result,
-						log,
-						'Error retrieving Jira task details',
-						processTaskResponse
-					);
+					return { content };
 				} catch (error) {
 					log.error(
 						`Error in get-jira-task tool: ${error.message}\n${error.stack}`
