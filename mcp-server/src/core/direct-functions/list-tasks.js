@@ -111,9 +111,10 @@ export async function listTasksDirect(args, log) {
 	} catch (error) {
 		// Catch unexpected errors from getCachedOrExecute itself (though unlikely)
 		log.error(
-			`Unexpected error during getCachedOrExecute for listTasks: ${error.message}`
+			`Unexpected error during getCachedOrExecute for listTasks: ${error.message}`,
+			error.stack
 		);
-		console.error(error.stack);
+		// Don't use console.error in MCP mode as it breaks the JSON protocol
 		return {
 			success: false,
 			error: { code: 'CACHE_UTIL_ERROR', message: error.message },

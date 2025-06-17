@@ -7,10 +7,7 @@
 import { z } from 'zod';
 import { JiraClient } from '../core/utils/jira-client.js';
 import { addJiraCommentDirect } from '../core/task-master-core.js';
-import {
-	handleApiResult,
-	createErrorResponse
-} from './utils.js';
+import { handleApiResult, createErrorResponse } from './utils.js';
 
 /**
  * Register the add_jira_comment tool with the MCP server
@@ -26,7 +23,7 @@ export function registerAddJiraCommentTool(server) {
 		name: 'add_jira_comment',
 		description: 'Add a comment to a Jira issue',
 		parameters: z.object({
-			id: z.string().describe('Jira issue key (e.g., \'PROJ-123\')'),
+			id: z.string().describe("Jira issue key (e.g., 'PROJ-123')"),
 			comment: z.string().describe('Comment text to add to the Jira issue')
 		}),
 		execute: async (args, { log, session }) => {
@@ -50,7 +47,7 @@ export function registerAddJiraCommentTool(server) {
 					{
 						id,
 						comment
-					}, 
+					},
 					log,
 					{ session }
 				);
@@ -58,8 +55,10 @@ export function registerAddJiraCommentTool(server) {
 				return handleApiResult(result, log);
 			} catch (error) {
 				log.error(`Error in add_jira_comment tool: ${error.message}`);
-				return createErrorResponse(`Failed to add comment to Jira issue: ${error.message}`);
+				return createErrorResponse(
+					`Failed to add comment to Jira issue: ${error.message}`
+				);
 			}
 		}
 	});
-} 
+}
