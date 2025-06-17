@@ -808,9 +808,7 @@ export class JiraTicket {
 					jiraIssue.fields.description
 				);
 			} catch (error) {
-				console.warn(
-					`Error extracting panels from Jira issue description: ${error.message}`
-				);
+				// Silent mode - don't use console.warn in MCP context as it breaks JSON protocol
 			}
 		}
 
@@ -836,9 +834,7 @@ export class JiraTicket {
 						jiraIssue.fields.description
 					) || 'No description';
 			} catch (error) {
-				console.warn(
-					`Error extracting plain text description: ${error.message}`
-				);
+				// Silent mode - don't use console.warn in MCP context as it breaks JSON protocol
 			}
 		}
 

@@ -133,7 +133,9 @@ export async function showJiraTaskDirect(args, log) {
 		// Enable silent mode to prevent console logs from interfering with JSON response
 		enableSilentMode();
 
-		log.info(`Retrieving task details for Jira issue: ${taskId}${includeImages === false ? ' (excluding images)' : ''}`);
+		log.info(
+			`Retrieving task details for Jira issue: ${taskId}${includeImages === false ? ' (excluding images)' : ''}`
+		);
 
 		// Use the dedicated function from jira-utils.js to fetch task details
 		const jiraTaskResult = await fetchJiraTaskDetails(

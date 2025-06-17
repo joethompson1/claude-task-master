@@ -29,7 +29,7 @@ import { registerRemoveTaskTool } from './remove-task.js';
 import { registerInitializeProjectTool } from './initialize-project.js';
 import { registerModelsTool } from './models.js';
 import { registerAddJiraCommentTool } from './add-jira-comment.js';
-import { registerGetJiraImageAttachmentTool } from './get-jira-image-attachment.js';
+import { registerGetJiraAttachmentTool } from './get-jira-attachment.js';
 
 /**
  * Register all Task Master tools with the MCP server
@@ -64,7 +64,7 @@ export function registerTaskMasterTools(server) {
 		registerRemoveSubtaskTool(server);
 		registerClearSubtasksTool(server);
 		registerAddJiraCommentTool(server);
-		registerGetJiraImageAttachmentTool(server);
+		registerGetJiraAttachmentTool(server);
 
 		// Group 5: Task Analysis & Expansion
 		registerAnalyzeProjectComplexityTool(server);

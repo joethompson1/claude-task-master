@@ -22,7 +22,12 @@ import sharp from 'sharp';
  * @param {boolean} [options.includeImages=true] - Whether to fetch and include image attachments
  * @returns {Promise<Object>} - Task details in Task Master format with allTasks array and any image attachments as base64
  */
-export async function fetchJiraTaskDetails(taskId, withSubtasks = false, log, options = {}) {
+export async function fetchJiraTaskDetails(
+	taskId,
+	withSubtasks = false,
+	log,
+	options = {}
+) {
 	try {
 		// Extract options with defaults
 		const { includeImages = true } = options;
@@ -40,7 +45,9 @@ export async function fetchJiraTaskDetails(taskId, withSubtasks = false, log, op
 			};
 		}
 
-		log.info(`Fetching Jira task details for key: ${taskId}${includeImages === false ? ' (excluding images)' : ''}`);
+		log.info(
+			`Fetching Jira task details for key: ${taskId}${includeImages === false ? ' (excluding images)' : ''}`
+		);
 
 		// Fetch the issue with conditional image fetching
 		const issueResult = await jiraClient.fetchIssue(taskId, {
@@ -93,7 +100,7 @@ export async function fetchJiraTaskDetails(taskId, withSubtasks = false, log, op
 		const responseData = {
 			task: task,
 			allTasks: allTasks,
-			images: includeImages ? (issue.attachmentImages || []) : []
+			images: includeImages ? issue.attachmentImages || [] : []
 		};
 
 		return {
@@ -525,11 +532,11 @@ export async function createJiraIssue(jiraTicket, log) {
  */
 export async function setJiraTaskStatus(taskId, newStatus, options = {}) {
 	try {
-		// Get logger from options or use console.log
+		// Get logger from options or use silent logger for MCP compatibility
 		const log = options.mcpLog || {
-			info: (message) => console.log(message),
-			warn: (message) => console.warn(message),
-			error: (message) => console.error(message)
+			info: () => {},
+			warn: () => {},
+			error: () => {}
 		};
 
 		// Determine if we're in MCP mode by checking for mcpLog
@@ -602,9 +609,8 @@ export async function setJiraTaskStatus(taskId, newStatus, options = {}) {
 
 		if (options.mcpLog) {
 			options.mcpLog.error(errorMessage);
-		} else {
-			console.error(errorMessage);
 		}
+		// Don't use console.error in MCP mode as it breaks the JSON protocol
 
 		// In MCP mode, return error object
 		return {
@@ -762,11 +768,11 @@ export async function updateJiraIssues(
 ) {
 	const { session, projectRoot } = options;
 
-	// Get logger from options or use console.log
+	// Get logger from options or use silent logger for MCP compatibility
 	const log = options.mcpLog || {
-		info: (message) => console.log(message),
-		warn: (message) => console.warn(message),
-		error: (message) => console.error(message)
+		info: () => {},
+		warn: () => {},
+		error: () => {}
 	};
 
 	try {
@@ -2180,7 +2186,6 @@ function parseSubtasksFromText(text, startId, expectedCount, parentTaskId) {
 	return subtasks;
 }
 
-
 /**
  * Compress image to ensure it's under 1MB for MCP image injection
  * @param {string} base64Data - Base64 encoded image data
@@ -2190,14 +2195,16 @@ function parseSubtasksFromText(text, startId, expectedCount, parentTaskId) {
  */
 export async function compressImageIfNeeded(base64Data, mimeType, log) {
 	const MAX_SIZE_BYTES = 1048576; // 1MB in bytes
-	
+
 	try {
 		// Convert base64 to buffer
 		const originalBuffer = Buffer.from(base64Data, 'base64');
 		const originalSize = originalBuffer.length;
-		
-		log?.info(`Original image size: ${originalSize} bytes (${(originalSize / 1024 / 1024).toFixed(2)} MB)`);
-		
+
+		log?.info(
+			`Original image size: ${originalSize} bytes (${(originalSize / 1024 / 1024).toFixed(2)} MB)`
+		);
+
 		// If already under 1MB, return as is
 		if (originalSize <= MAX_SIZE_BYTES) {
 			log?.info('Image is already under 1MB, no compression needed');
@@ -2208,24 +2215,26 @@ export async function compressImageIfNeeded(base64Data, mimeType, log) {
 				compressedSize: originalSize
 			};
 		}
-		
+
 		log?.info('Image exceeds 1MB, compressing...');
-		
+
 		// Start with quality 80% and reduce if needed
 		let quality = 80;
 		let compressedBuffer;
 		let finalMimeType = 'image/jpeg'; // Convert to JPEG for better compression
-		
+
 		do {
 			const sharpInstance = sharp(originalBuffer);
-			
+
 			// Convert to JPEG with specified quality
 			compressedBuffer = await sharpInstance
 				.jpeg({ quality: quality, progressive: true })
 				.toBuffer();
-			
-			log?.info(`Compressed with quality ${quality}%: ${compressedBuffer.length} bytes`);
-			
+
+			log?.info(
+				`Compressed with quality ${quality}%: ${compressedBuffer.length} bytes`
+			);
+
 			// Reduce quality if still too large
 			if (compressedBuffer.length > MAX_SIZE_BYTES && quality > 10) {
 				quality -= 10;
@@ -2233,44 +2242,49 @@ export async function compressImageIfNeeded(base64Data, mimeType, log) {
 				break;
 			}
 		} while (compressedBuffer.length > MAX_SIZE_BYTES && quality >= 10);
-		
+
 		// If still too large, try resizing
 		if (compressedBuffer.length > MAX_SIZE_BYTES) {
 			log?.info('Still too large after quality reduction, trying resize...');
-			
+
 			const sharpInstance = sharp(originalBuffer);
 			const metadata = await sharpInstance.metadata();
-			
+
 			// Reduce dimensions by 20% at a time
 			let scale = 0.8;
 			do {
 				const newWidth = Math.floor(metadata.width * scale);
 				const newHeight = Math.floor(metadata.height * scale);
-				
+
 				compressedBuffer = await sharp(originalBuffer)
 					.resize(newWidth, newHeight)
 					.jpeg({ quality: 70, progressive: true })
 					.toBuffer();
-				
-				log?.info(`Resized to ${newWidth}x${newHeight}: ${compressedBuffer.length} bytes`);
-				
+
+				log?.info(
+					`Resized to ${newWidth}x${newHeight}: ${compressedBuffer.length} bytes`
+				);
+
 				scale -= 0.1;
 			} while (compressedBuffer.length > MAX_SIZE_BYTES && scale > 0.3);
 		}
-		
+
 		const compressedBase64 = compressedBuffer.toString('base64');
 		const compressedSize = compressedBuffer.length;
-		
-		log?.info(`Final compressed size: ${compressedSize} bytes (${(compressedSize / 1024 / 1024).toFixed(2)} MB)`);
-		log?.info(`Compression ratio: ${((1 - compressedSize / originalSize) * 100).toFixed(1)}%`);
-		
+
+		log?.info(
+			`Final compressed size: ${compressedSize} bytes (${(compressedSize / 1024 / 1024).toFixed(2)} MB)`
+		);
+		log?.info(
+			`Compression ratio: ${((1 - compressedSize / originalSize) * 100).toFixed(1)}%`
+		);
+
 		return {
 			base64: compressedBase64,
 			mimeType: finalMimeType,
 			originalSize: originalSize,
 			compressedSize: compressedSize
 		};
-		
 	} catch (error) {
 		log?.error(`Error compressing image: ${error.message}`);
 		// Return original image if compression fails

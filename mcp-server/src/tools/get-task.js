@@ -136,7 +136,9 @@ export function registerShowTaskTool(server) {
 					.boolean()
 					.optional()
 					.default(true)
-					.describe('If true, will fetch and include image attachments (default: true)')
+					.describe(
+						'If true, will fetch and include image attachments (default: true)'
+					)
 			}),
 			execute: async (args, { log, session }) => {
 				// Log the session right at the start of execute
@@ -145,7 +147,9 @@ export function registerShowTaskTool(server) {
 				); // Use JSON.stringify for better visibility
 
 				try {
-					log.info(`Getting Jira task details for ID: ${args.id}${args.includeImages === false ? ' (excluding images)' : ''}`);
+					log.info(
+						`Getting Jira task details for ID: ${args.id}${args.includeImages === false ? ' (excluding images)' : ''}`
+					);
 
 					const result = await showJiraTaskDirect(
 						{
@@ -160,11 +164,12 @@ export function registerShowTaskTool(server) {
 					const content = [];
 					content.push({
 						type: 'text',
-						text: typeof result.data.task === 'object'
-							? // Format JSON nicely with indentation
-								JSON.stringify(result.data.task, null, 2)
-							: // Keep other content types as-is
-								String(result.data.task)
+						text:
+							typeof result.data.task === 'object'
+								? // Format JSON nicely with indentation
+									JSON.stringify(result.data.task, null, 2)
+								: // Keep other content types as-is
+									String(result.data.task)
 					});
 
 					// Add each image to the content array (only if images were fetched)

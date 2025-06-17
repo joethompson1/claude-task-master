@@ -5,7 +5,10 @@
  */
 
 import { JiraClient } from '../utils/jira-client.js';
-import { enableSilentMode, disableSilentMode } from '../../../../scripts/modules/utils.js';
+import {
+	enableSilentMode,
+	disableSilentMode
+} from '../../../../scripts/modules/utils.js';
 
 /**
  * Add a comment to a Jira issue
@@ -18,7 +21,7 @@ import { enableSilentMode, disableSilentMode } from '../../../../scripts/modules
  */
 export async function addJiraCommentDirect(args, log, context = {}) {
 	const { id, comment } = args;
-	
+
 	try {
 		// Verify that required parameters are provided
 		if (!id) {
@@ -45,19 +48,20 @@ export async function addJiraCommentDirect(args, log, context = {}) {
 
 		// Initialize the JiraClient
 		const jiraClient = new JiraClient();
-		
+
 		// Check if Jira is enabled
 		if (!JiraClient.isJiraEnabled()) {
 			return {
 				success: false,
 				error: {
 					code: 'JIRA_NOT_ENABLED',
-					message: 'Jira integration is not properly configured. Please set the required environment variables.'
+					message:
+						'Jira integration is not properly configured. Please set the required environment variables.'
 				},
 				fromCache: false
 			};
 		}
-		
+
 		// Create a logger wrapper to ensure consistent logging format
 		const logWrapper = {
 			info: (message, ...args) => log.info(message, ...args),
@@ -71,10 +75,12 @@ export async function addJiraCommentDirect(args, log, context = {}) {
 		enableSilentMode();
 		try {
 			log.info(`Adding comment to Jira issue ${id}`);
-			
+
 			// Call the Jira client to add the comment
-			const result = await jiraClient.addComment(id, comment, { log: logWrapper });
-			
+			const result = await jiraClient.addComment(id, comment, {
+				log: logWrapper
+			});
+
 			// Handle potential errors in the response
 			if (!result.success) {
 				return {
@@ -83,7 +89,7 @@ export async function addJiraCommentDirect(args, log, context = {}) {
 					fromCache: false
 				};
 			}
-			
+
 			return {
 				success: true,
 				data: result.data,
@@ -103,4 +109,4 @@ export async function addJiraCommentDirect(args, log, context = {}) {
 			fromCache: false
 		};
 	}
-} 
+}
