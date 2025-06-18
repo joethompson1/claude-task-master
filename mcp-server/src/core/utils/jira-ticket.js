@@ -684,12 +684,8 @@ export class JiraTicket {
 					const panelTitle = headingNode.content[0].text;
 					let panelKey = JiraTicket.convertToCamelCase(panelTitle);
 
-					// Extract panel content (everything except the heading)
-					const contentNodes = item.content.filter(
-						(node) => node.type !== 'heading'
-					);
-					const extractedContent =
-						JiraTicket.extractTextFromNodes(contentNodes);
+					// Extract panel content (including the heading for better context)
+					const extractedContent = JiraTicket.extractTextFromNodes(item.content);
 
 					// Add to result object
 					result[panelKey] = extractedContent.trim();
@@ -780,7 +776,7 @@ export class JiraTicket {
 	}
 
 	/**
-	 * Extract plain text description from Jira description field (first paragraph only)
+	 * Extract plain text description from Jira description field (full content, not just first paragraph)
 	 * @param {Object} description - Jira description object in Atlassian Document Format
 	 * @returns {string} - Plain text description
 	 */
@@ -789,21 +785,183 @@ export class JiraTicket {
 			return 'No description';
 		}
 
-		// Find first paragraph or text content
-		for (const item of description.content) {
-			if (item.type === 'paragraph' || (item.type === 'text' && item.text)) {
-				const text = JiraTicket.extractTextFromNodes([item]).trim();
-				if (text) {
-					return text;
-				}
+		// Extract ALL content from description, not just first paragraph
+		const fullText = JiraTicket.extractTextFromNodes(description.content).trim();
+		
+		if (fullText) {
+			return fullText;
+		}
+
+		return 'No description';
+	}
+
+	/**
+	 * Parse structured description content into sections based on headings
+	 * @param {string} fullDescription - Full description text
+	 * @returns {Object} - Object with parsed sections
+	 */
+	static parseStructuredDescription(fullDescription) {
+		if (!fullDescription) {
+			return {
+				description: '',
+				acceptanceCriteria: '',
+				details: '',
+				testStrategy: ''
+			};
+		}
+
+		const lines = fullDescription.split('\n');
+		const sections = {
+			description: '',
+			acceptanceCriteria: '',
+			details: '',
+			testStrategy: ''
+		};
+
+		let currentSection = 'description';
+		let descriptionLines = [];
+		let acceptanceCriteriaLines = [];
+		let detailsLines = [];
+		let testStrategyLines = [];
+
+		for (const line of lines) {
+			const trimmedLine = line.trim();
+			
+			// Check for section headings (case insensitive, more precise matching)
+			const lowerLine = trimmedLine.toLowerCase();
+			
+			// Check for Implementation Details / Technical Details section
+			if (this._isImplementationDetailsHeader(lowerLine)) {
+				currentSection = 'details';
+				detailsLines.push(line); // Include the header in the section
+				continue;
+			}
+			
+			// Check for Acceptance Criteria / Definition of Done section
+			if (this._isAcceptanceCriteriaHeader(lowerLine)) {
+				currentSection = 'acceptanceCriteria';
+				acceptanceCriteriaLines.push(line); // Include the header in the section
+				continue;
+			}
+			
+			// Check for Test Strategy section (but not "test strategy (tdd)" which should stay in acceptance criteria)
+			if (this._isTestStrategyHeader(lowerLine) && !lowerLine.includes('(tdd)')) {
+				currentSection = 'testStrategy';
+				testStrategyLines.push(line); // Include the header in the section
+				continue;
+			}
+
+			// Add line to current section
+			switch (currentSection) {
+				case 'acceptanceCriteria':
+					// Don't include lines that start a new major section
+					if (this._isTestStrategyHeader(lowerLine) && !lowerLine.includes('(tdd)')) {
+						// This line will be handled by test strategy section
+						currentSection = 'testStrategy';
+						testStrategyLines.push(line);
+					} else {
+						acceptanceCriteriaLines.push(line);
+					}
+					break;
+				case 'details':
+					detailsLines.push(line);
+					break;
+				case 'testStrategy':
+					testStrategyLines.push(line);
+					break;
+				default:
+					descriptionLines.push(line);
 			}
 		}
 
-		// If no paragraphs found, extract from the whole content
-		return (
-			JiraTicket.extractTextFromNodes(description.content).split('\n')[0] ||
-			'No description'
-		);
+		sections.description = descriptionLines.join('\n').trim();
+		sections.acceptanceCriteria = acceptanceCriteriaLines.join('\n').trim();
+		sections.details = detailsLines.join('\n').trim();
+		sections.testStrategy = testStrategyLines.join('\n').trim();
+
+		return sections;
+	}
+
+	/**
+	 * Check if a line is an Implementation Details header
+	 * @param {string} lowerLine - Line text in lowercase
+	 * @returns {boolean} - True if it's an implementation details header
+	 * @private
+	 */
+	static _isImplementationDetailsHeader(lowerLine) {
+		// Check for various forms of implementation details headers
+		const patterns = [
+			/^#{1,6}\s*implementation\s*details?\s*$/,
+			/^#{1,6}\s*technical\s*details?\s*$/,
+			/^#{1,6}\s*details?\s*$/,
+			/^implementation\s*details?\s*$/,
+			/^technical\s*details?\s*$/,
+			/^details?\s*$/
+		];
+		
+		return patterns.some(pattern => pattern.test(lowerLine));
+	}
+
+	/**
+	 * Check if a line is an Acceptance Criteria header
+	 * @param {string} lowerLine - Line text in lowercase
+	 * @returns {boolean} - True if it's an acceptance criteria header
+	 * @private
+	 */
+	static _isAcceptanceCriteriaHeader(lowerLine) {
+		// Check for various forms of acceptance criteria headers
+		const patterns = [
+			/^#{1,6}\s*acceptance\s*criteria\s*$/,
+			/^#{1,6}\s*definition\s*of\s*done\s*$/,
+			/^#{1,6}\s*dod\s*$/,
+			/^acceptance\s*criteria\s*$/,
+			/^definition\s*of\s*done\s*$/
+		];
+		
+		return patterns.some(pattern => pattern.test(lowerLine));
+	}
+
+	/**
+	 * Check if a line is a Test Strategy header
+	 * @param {string} lowerLine - Line text in lowercase
+	 * @returns {boolean} - True if it's a test strategy header
+	 * @private
+	 */
+	static _isTestStrategyHeader(lowerLine) {
+		// Check for various forms of test strategy headers
+		const patterns = [
+			/^#{1,6}\s*test\s*strategy\s*(\(tdd\))?\s*$/,
+			/^#{1,6}\s*testing\s*strategy\s*$/,
+			/^#{1,6}\s*testing\s*approach\s*$/,
+			/^#{1,6}\s*testing\s*$/,
+			/^test\s*strategy\s*(\(tdd\))?\s*$/,
+			/^testing\s*strategy\s*$/,
+			/^testing\s*approach\s*$/
+		];
+		
+		return patterns.some(pattern => pattern.test(lowerLine));
+	}
+
+	/**
+	 * Extract content that is not in panels from ADF description
+	 * @param {Object} description - Jira description object in Atlassian Document Format
+	 * @returns {string} - Content that is not in panels
+	 * @private
+	 */
+	static _extractNonPanelContent(description) {
+		if (!description || !description.content) {
+			return 'No description';
+		}
+
+		// Filter out panel content and extract only non-panel nodes
+		const nonPanelNodes = description.content.filter(node => {
+			return node.type !== 'panel' && node.type !== 'rule';
+		});
+
+		// Extract text from non-panel nodes
+		const nonPanelText = JiraTicket.extractTextFromNodes(nonPanelNodes).trim();
+		
+		return nonPanelText || 'No description';
 	}
 
 	/**
@@ -918,14 +1076,39 @@ export class JiraTicket {
 			});
 		}
 
-		// Extract description text if available
+		// Extract full description text if available
 		let description = 'No description';
+		let acceptanceCriteria = '';
+		let details = '';
+		let testStrategy = '';
+		
 		if (jiraIssue.fields?.description) {
 			try {
-				description =
-					JiraTicket.extractPlainTextDescription(
-						jiraIssue.fields.description
-					) || 'No description';
+				const fullDescription = JiraTicket.extractPlainTextDescription(
+					jiraIssue.fields.description
+				) || 'No description';
+				
+				// Always try to parse structured content from the full description
+				// This handles both cases: when panels exist and when they don't
+				const sections = JiraTicket.parseStructuredDescription(fullDescription);
+				
+				// Use parsed sections as the base
+				description = sections.description || fullDescription;
+				acceptanceCriteria = sections.acceptanceCriteria || '';
+				details = sections.details || '';
+				testStrategy = sections.testStrategy || '';
+				
+				// If we have panels, prefer non-panel content for description
+				// but keep the parsed structured sections as fallback
+				if (Object.keys(panelData).length > 0) {
+					const nonPanelDescription = JiraTicket._extractNonPanelContent(jiraIssue.fields.description);
+					// Only use non-panel description if it's substantially different and not empty
+					if (nonPanelDescription && nonPanelDescription !== 'No description' && 
+						nonPanelDescription.length < fullDescription.length * 0.8) {
+						description = nonPanelDescription;
+					}
+					// Panel data will override structured sections if they exist (handled in update call below)
+				}
 			} catch (error) {
 				// Silent mode - don't use console.warn in MCP context as it breaks JSON protocol
 			}
@@ -935,6 +1118,9 @@ export class JiraTicket {
 		const ticket = new JiraTicket({
 			title: jiraIssue.fields?.summary || '',
 			description: description,
+			acceptanceCriteria: acceptanceCriteria,
+			details: details,
+			testStrategy: testStrategy,
 			priority: jiraIssue.fields?.priority?.name || 'Medium',
 			issueType: jiraIssue.fields?.issuetype?.name || 'Task',
 			jiraKey: jiraIssue.key,
