@@ -1021,4 +1021,72 @@ export class JiraClient {
 			);
 		}
 	}
+
+	/**
+	 * Fetch remote links for a Jira issue
+	 * @param {string} issueKey - The Jira issue key
+	 * @param {Object} [options] - Additional options
+	 * @param {Object} [options.log] - Logger object
+	 * @returns {Promise<Object>} - Result with success status and remote links data
+	 */
+	async fetchRemoteLinks(issueKey, options = {}) {
+		const log = options.log || {
+			info: () => {},
+			warn: () => {},
+			error: () => {},
+			debug: () => {}
+		};
+
+		try {
+			if (!this.isReady()) {
+				return this.createErrorResponse(
+					'JIRA_NOT_ENABLED',
+					'Jira integration is not properly configured'
+				);
+			}
+
+			if (!issueKey) {
+				return this.createErrorResponse(
+					'JIRA_INVALID_INPUT',
+					'Issue key is required'
+				);
+			}
+
+			log.info?.(`Fetching remote links for issue: ${issueKey}`);
+
+			const client = this.getClient();
+			const response = await client.get(`/rest/api/3/issue/${issueKey}/remotelink`);
+
+			if (!response.data) {
+				return this.createErrorResponse(
+					'JIRA_INVALID_RESPONSE',
+					'No remote links data received from Jira API'
+				);
+			}
+
+			// response.data should be an array of remote link objects
+			const remoteLinks = Array.isArray(response.data) ? response.data : [];
+
+			return {
+				success: true,
+				data: remoteLinks
+			};
+		} catch (error) {
+			// If the issue doesn't have remote links or they're not accessible, return empty array instead of error
+			if (error.response?.status === 404) {
+				log.info?.(`No remote links found for issue ${issueKey}`);
+				return {
+					success: true,
+					data: []
+				};
+			}
+
+			log.error?.(`Error fetching remote links: ${error.message}`);
+			return this.createErrorResponse(
+				'JIRA_REQUEST_ERROR',
+				`Failed to fetch remote links: ${error.message}`,
+				error.response?.data
+			);
+		}
+	}
 }

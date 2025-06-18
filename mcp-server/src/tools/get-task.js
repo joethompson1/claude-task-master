@@ -15,6 +15,10 @@ import {
 } from '../core/task-master-core.js';
 import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
+import { ContextAggregator } from '../core/utils/context-aggregator.js';
+import { JiraRelationshipResolver } from '../core/utils/jira-relationship-resolver.js';
+import { BitbucketClient } from '../core/utils/bitbucket-client.js';
+import { PRTicketMatcher } from '../core/utils/pr-ticket-matcher.js';
 
 /**
  * Custom processor function that removes allTasks from the response
@@ -138,22 +142,22 @@ export function registerShowTaskTool(server) {
 					.default(true)
 					.describe(
 						'If true, will fetch and include image attachments (default: true)'
-					)
+					),
+				includeContext: z
+					.boolean()
+					.optional()
+					.default(true)
+					.describe('If true, will include related tickets and PR context (default: true)')
 			}),
 			execute: async (args, { log, session }) => {
-				// Log the session right at the start of execute
-				log.info(
-					`Session object received in execute: ${JSON.stringify(session)}`
-				); // Use JSON.stringify for better visibility
+				log.info(`Session object received in execute: ${JSON.stringify(session)}`);
 
 				try {
-					log.info(
-						`Getting Jira task details for ID: ${args.id}${args.includeImages === false ? ' (excluding images)' : ''}`
-					);
+					log.info(`Getting Jira task details for ID: ${args.id}${args.includeImages === false ? ' (excluding images)' : ''}${args.includeContext === false ? ' (excluding context)' : ''}`);
 
+					// Get the base task data first
 					const result = await showJiraTaskDirect(
 						{
-							// Only need to pass the ID for Jira tasks
 							id: args.id,
 							withSubtasks: args.withSubtasks,
 							includeImages: args.includeImages
@@ -161,15 +165,35 @@ export function registerShowTaskTool(server) {
 						log
 					);
 
+					if (!result.success) {
+						return createErrorResponse(`Failed to fetch task: ${result.error?.message || 'Unknown error'}`);
+					}
+
+					// Add context if requested and available
+					if (args.includeContext !== false) {
+						try {
+							// Add debug info to the ticket so we can see it in the response
+							result.data.task.contextDebug = { started: true, timestamp: new Date().toISOString() };
+							await addContextToTask(result.data.task, args.id, log);
+						} catch (contextError) {
+							// Context failure should not break the main functionality
+							log.warn(`Failed to add context to task ${args.id}: ${contextError.message}`);
+							result.data.task.contextDebug = { 
+								...result.data.task.contextDebug, 
+								error: contextError.message,
+								stack: contextError.stack 
+							};
+							// Continue without context
+						}
+					}
+
+					// Rest of existing response formatting logic...
 					const content = [];
 					content.push({
 						type: 'text',
-						text:
-							typeof result.data.task === 'object'
-								? // Format JSON nicely with indentation
-									JSON.stringify(result.data.task, null, 2)
-								: // Keep other content types as-is
-									String(result.data.task)
+						text: typeof result.data.task === 'object'
+							? JSON.stringify(result.data.task, null, 2)
+							: String(result.data.task)
 					});
 
 					// Add each image to the content array (only if images were fetched)
@@ -194,14 +218,166 @@ export function registerShowTaskTool(server) {
 
 					return { content };
 				} catch (error) {
-					log.error(
-						`Error in get-jira-task tool: ${error.message}\n${error.stack}`
-					); // Add stack trace
-					return createErrorResponse(
-						`Failed to get Jira task: ${error.message}`
-					);
+					log.error(`Error in get-jira-task tool: ${error.message}\n${error.stack}`);
+					return createErrorResponse(`Failed to get task: ${error.message}`);
 				}
 			}
 		});
+	}
+}
+
+/**
+ * Add context to a JiraTicket if context services are available
+ * @param {JiraTicket} ticket - The ticket to enhance with context
+ * @param {string} ticketId - The ticket ID for context lookup
+ * @param {Object} log - Logger instance
+ */
+async function addContextToTask(ticket, ticketId, log) {
+	try {
+		log.info(`[DEBUG] Starting addContextToTask for ticket ${ticketId}`);
+		ticket.contextDebug = { ...ticket.contextDebug, step: 'starting' };
+		
+		// Check if context services are available
+		log.info(`[DEBUG] Creating JiraClient...`);
+		const jiraClient = new JiraClient();
+		log.info(`[DEBUG] JiraClient created, checking if ready...`);
+		ticket.contextDebug = { ...ticket.contextDebug, step: 'jira_client_check', jiraReady: jiraClient.isReady() };
+		
+		if (!jiraClient.isReady()) {
+			log.warn(`[DEBUG] Jira client not ready, skipping context`);
+			ticket.contextDebug = { ...ticket.contextDebug, step: 'jira_not_ready', reason: 'Jira client not ready' };
+			return;
+		}
+		log.info(`[DEBUG] ✅ Jira client is ready`);
+
+		log.info(`[DEBUG] Creating BitbucketClient...`);
+		const bitbucketClient = new BitbucketClient();
+		log.info(`[DEBUG] BitbucketClient created, checking if ready...`);
+		log.info(`[DEBUG] BitbucketClient.enabled: ${bitbucketClient.enabled}`);
+		log.info(`[DEBUG] BitbucketClient.client: ${!!bitbucketClient.client}`);
+		log.info(`[DEBUG] BitbucketClient.error: ${bitbucketClient.error}`);
+		
+		// Add environment variable debugging
+		const bitbucketEnvVars = {
+			BITBUCKET_WORKSPACE: process.env.BITBUCKET_WORKSPACE,
+			BITBUCKET_USERNAME: process.env.BITBUCKET_USERNAME,
+			BITBUCKET_API_TOKEN: process.env.BITBUCKET_API_TOKEN ? '[SET]' : '[NOT SET]',
+			BITBUCKET_DEFAULT_REPO: process.env.BITBUCKET_DEFAULT_REPO
+		};
+		
+		// Test the static method directly
+		let staticEnabledCheck, staticConfig;
+		try {
+			staticEnabledCheck = BitbucketClient.isBitbucketEnabled();
+			staticConfig = BitbucketClient.getBitbucketConfig();
+		} catch (staticError) {
+			staticEnabledCheck = `ERROR: ${staticError.message}`;
+			staticConfig = `ERROR: ${staticError.message}`;
+		}
+		
+		ticket.contextDebug = { 
+			...ticket.contextDebug, 
+			step: 'bitbucket_client_check', 
+			bitbucketEnabled: bitbucketClient.enabled,
+			bitbucketHasClient: !!bitbucketClient.client,
+			bitbucketError: bitbucketClient.error,
+			bitbucketReady: bitbucketClient.isReady(),
+			bitbucketEnvVars: bitbucketEnvVars,
+			staticEnabledCheck: staticEnabledCheck,
+			staticConfig: typeof staticConfig === 'object' ? {
+				workspace: staticConfig.workspace,
+				username: staticConfig.username,
+				apiToken: staticConfig.apiToken ? '[SET]' : '[NOT SET]',
+				defaultRepo: staticConfig.defaultRepo
+			} : staticConfig
+		};
+		
+		if (!bitbucketClient.isReady()) {
+			log.warn(`[DEBUG] Bitbucket client not ready, skipping context. Enabled: ${bitbucketClient.enabled}, Client: ${!!bitbucketClient.client}, Error: ${bitbucketClient.error}`);
+			ticket.contextDebug = { 
+				...ticket.contextDebug, 
+				step: 'bitbucket_not_ready', 
+				reason: `Bitbucket not ready. Enabled: ${bitbucketClient.enabled}, Client: ${!!bitbucketClient.client}, Error: ${bitbucketClient.error}`
+			};
+			return;
+		}
+		log.info(`[DEBUG] ✅ Bitbucket client is ready`);
+
+		// Initialize context services
+		log.info(`[DEBUG] Initializing context services...`);
+		const relationshipResolver = new JiraRelationshipResolver(jiraClient);
+		const prMatcher = new PRTicketMatcher(bitbucketClient, jiraClient);
+		const contextAggregator = new ContextAggregator(relationshipResolver, bitbucketClient, prMatcher);
+		log.info(`[DEBUG] ✅ Context services initialized`);
+		ticket.contextDebug = { 
+			...ticket.contextDebug, 
+			step: 'services_initialized',
+			ticketForContext: {
+				jiraKey: ticket.jiraKey,
+				parentKey: ticket.parentKey,
+				issueType: ticket.issueType,
+				hasParentKey: !!ticket.parentKey,
+				ticketKeys: Object.keys(ticket)
+			}
+		};
+
+		log.info(`[DEBUG] Fetching context for ticket ${ticketId}...`);
+
+		// Get context with reasonable timeout
+		const contextOptions = {
+			depth: 2,
+			maxRelated: 15, // Limit for performance
+			repoSlug: process.env.BITBUCKET_DEFAULT_REPO,
+			log // Pass the logger to the context aggregator
+		};
+		log.info(`[DEBUG] Context options: ${JSON.stringify(contextOptions)}`);
+		ticket.contextDebug = { ...ticket.contextDebug, step: 'starting_aggregation', contextOptions };
+		
+		const contextPromise = contextAggregator.aggregateContext(ticketId, contextOptions);
+
+		// 5-second timeout for context retrieval
+		const timeoutPromise = new Promise((_, reject) =>
+			setTimeout(() => reject(new Error('Context retrieval timeout')), 5000)
+		);
+
+		log.info(`[DEBUG] Starting context aggregation with 5s timeout...`);
+		const context = await Promise.race([contextPromise, timeoutPromise]);
+		log.info(`[DEBUG] Context aggregation completed. Has debugInfo: ${!!context?.debugInfo}`);
+		log.info(`[DEBUG] Context debugInfo: ${JSON.stringify(context?.debugInfo, null, 2)}`);
+		ticket.contextDebug = { 
+			...ticket.contextDebug, 
+			step: 'aggregation_complete', 
+			hasContext: !!context,
+			contextHasDebugInfo: !!context?.debugInfo,
+			contextDebugInfo: context?.debugInfo,
+			contextResult: context // Add the full context result for debugging
+		};
+
+		if (context && context.relatedContext) {
+			log.info(`[DEBUG] Adding context to ticket...`);
+			// Add context directly to the ticket object since it might not be a JiraTicket instance
+			if (typeof ticket.addContext === 'function') {
+				ticket.addContext(context.relatedContext);
+			} else {
+				// Fallback: add context directly to the object
+				ticket.relatedContext = context.relatedContext;
+			}
+			log.info(`[DEBUG] ✅ Added context with ${context.relatedContext.summary.totalRelated} related items`);
+			ticket.contextDebug = { ...ticket.contextDebug, step: 'context_added', totalRelated: context.relatedContext.summary.totalRelated };
+		} else {
+			log.warn(`[DEBUG] No context returned or no relatedContext property`);
+			ticket.contextDebug = { ...ticket.contextDebug, step: 'no_context', context: context };
+		}
+
+	} catch (error) {
+		log.error(`[DEBUG] Context retrieval failed: ${error.message}`);
+		log.error(`[DEBUG] Error stack: ${error.stack}`);
+		ticket.contextDebug = { 
+			...ticket.contextDebug, 
+			step: 'error', 
+			error: error.message, 
+			stack: error.stack 
+		};
+		// Don't throw - context failure shouldn't break main functionality
 	}
 }

@@ -48,6 +48,7 @@ export class JiraTicket {
 		this.dependencies = data.dependencies || [];
 		this.status = data.status || '';
 		this.attachments = data.attachments || [];
+		this.relatedContext = data.relatedContext || null;
 	}
 
 	/**
@@ -134,6 +135,10 @@ export class JiraTicket {
 				: [];
 		}
 
+		if (data.relatedContext !== undefined) {
+			this.relatedContext = data.relatedContext;
+		}
+
 		return this;
 	}
 
@@ -157,6 +162,18 @@ export class JiraTicket {
 	addDependency(key) {
 		if (key && !this.dependencies.includes(key)) {
 			this.dependencies.push(key);
+		}
+		return this;
+	}
+
+	/**
+	 * Add context information to the ticket
+	 * @param {Object} context - Context data to add
+	 * @returns {JiraTicket} - This instance for chaining
+	 */
+	addContext(context) {
+		if (context) {
+			this.relatedContext = context;
 		}
 		return this;
 	}
