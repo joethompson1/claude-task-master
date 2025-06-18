@@ -162,7 +162,53 @@ export class JiraTicket {
 	}
 
 	/**
-	 * Convert markdown text to Atlassian Document Format (ADF) nodes
+	 * Normalize markdown content to ensure consistent formatting
+	 * @param {string} text - Raw markdown text
+	 * @returns {string} - Normalized markdown text
+	 * @private
+	 */
+	_normalizeMarkdown(text) {
+		if (!text) return '';
+
+		// Remove excessive whitespace and normalize line breaks
+		let normalized = text.trim();
+
+		// Normalize line endings to \n
+		normalized = normalized.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+		// Remove trailing spaces from lines
+		normalized = normalized.replace(/[ \t]+$/gm, '');
+
+		// Normalize multiple empty lines to single empty line, but preserve necessary line breaks
+		normalized = normalized.replace(/\n{3,}/g, '\n\n');
+
+		// Fix critical markdown formatting issues with minimal changes
+		// Ensure proper spacing around headers - but only if they're malformed
+		normalized = normalized.replace(/^(#{1,6})([^#\s])/gm, '$1 $2');
+
+		// Fix bold/italic formatting - remove extra spaces WITHIN the marks (but be careful)
+		normalized = normalized.replace(/\*\*\s+([^*]+?)\s+\*\*/g, '**$1**');
+		normalized = normalized.replace(/\*\s+([^*]+?)\s+\*/g, '*$1*');
+
+		// Fix inline code formatting - remove extra spaces WITHIN backticks
+		normalized = normalized.replace(/`\s+([^`]+?)\s+`/g, '`$1`');
+
+		// Only fix critical code block issues - be very conservative
+		// Fix cases where content is concatenated with closing ``` (but preserve language identifiers)
+		normalized = normalized.replace(/([^`\n\s])```$/gm, '$1\n```');
+
+		// Fix cases where closing ``` is immediately followed by content that should be on new line
+		normalized = normalized.replace(/```([A-Z#])/g, '```\n$1');
+
+		// Ensure code blocks have line breaks around them
+		normalized = normalized.replace(/([^\n])```([a-z]*)/g, '$1\n```$2');
+		normalized = normalized.replace(/```$/gm, '```\n');
+
+		return normalized;
+	}
+
+	/**
+	 * Enhanced markdown to ADF conversion with better error handling
 	 * @param {string} text - Markdown text to convert
 	 * @returns {Array} - Array of ADF nodes
 	 * @private
@@ -170,61 +216,121 @@ export class JiraTicket {
 	_convertMarkdownToAdf(text) {
 		if (!text) return [];
 
-		// Basic paragraph split by double newline
-		const paragraphs = text.split(/\n\n+/);
+		// Normalize the markdown first to ensure consistent formatting
+		const normalizedText = this._normalizeMarkdown(text);
+
+		try {
+			return this._parseMarkdownToNodes(normalizedText);
+		} catch (error) {
+			// Fallback: if parsing fails, treat the entire text as a simple paragraph
+			console.warn(
+				'Markdown parsing failed, falling back to plain text:',
+				error.message
+			);
+			return [
+				{
+					type: 'paragraph',
+					content: [{ type: 'text', text: normalizedText }]
+				}
+			];
+		}
+	}
+
+	/**
+	 * Parse normalized markdown into ADF nodes using a simplified, more reliable approach
+	 * @param {string} text - Normalized markdown text
+	 * @returns {Array} - Array of ADF nodes
+	 * @private
+	 */
+	_parseMarkdownToNodes(text) {
 		const nodes = [];
+		const lines = text.split('\n');
+		let i = 0;
 
-		paragraphs.forEach((paragraph) => {
+		while (i < lines.length) {
+			const line = lines[i];
+
+			// Skip empty lines
+			if (!line.trim()) {
+				i++;
+				continue;
+			}
+
 			// Check for code block
-			if (paragraph.startsWith('```') && paragraph.endsWith('```')) {
-				// Extract language if specified after first ``` (e.g. ```javascript)
-				let language = null;
-				let content = paragraph.substring(3, paragraph.length - 3);
+			if (line.trim().startsWith('```')) {
+				const language = line.trim().substring(3).trim();
+				const codeLines = [];
+				i++; // Move past opening line
 
-				const firstLineBreak = content.indexOf('\n');
-				if (firstLineBreak > 0) {
-					const possibleLang = content.substring(0, firstLineBreak).trim();
-					if (possibleLang && !possibleLang.includes(' ')) {
-						language = possibleLang;
-						content = content.substring(firstLineBreak + 1);
+				// Collect code block content
+				while (i < lines.length) {
+					const currentLine = lines[i];
+
+					// Check if this line contains closing backticks
+					if (currentLine.includes('```')) {
+						// Handle cases where closing ``` might have content after it
+						const beforeClosing = currentLine.substring(
+							0,
+							currentLine.indexOf('```')
+						);
+						if (beforeClosing.trim()) {
+							codeLines.push(beforeClosing);
+						}
+						i++; // Skip this closing line
+						break;
+					} else {
+						codeLines.push(currentLine);
+						i++;
 					}
 				}
 
-				nodes.push({
+				// Create proper ADF codeBlock node
+				const codeBlockNode = {
 					type: 'codeBlock',
-					attrs: { language },
-					content: [{ type: 'text', text: content.trim() }]
-				});
+					content: [{ type: 'text', text: codeLines.join('\n') }]
+				};
+
+				// Only add language attribute if it's not empty - Jira is sensitive to empty/null attrs
+				if (language && language.length > 0) {
+					codeBlockNode.attrs = { language: language };
+				}
+
+				nodes.push(codeBlockNode);
+				continue;
 			}
+
 			// Check for heading
-			else if (paragraph.startsWith('# ')) {
+			const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+			if (headingMatch) {
+				const level = Math.min(headingMatch[1].length, 6);
+				const content = headingMatch[2].trim();
+
 				nodes.push({
 					type: 'heading',
-					attrs: { level: 1 },
-					content: [{ type: 'text', text: paragraph.substring(2).trim() }]
+					attrs: { level },
+					content: [{ type: 'text', text: content }]
 				});
-			} else if (paragraph.startsWith('## ')) {
-				nodes.push({
-					type: 'heading',
-					attrs: { level: 2 },
-					content: [{ type: 'text', text: paragraph.substring(3).trim() }]
-				});
-			} else if (paragraph.startsWith('### ')) {
-				nodes.push({
-					type: 'heading',
-					attrs: { level: 3 },
-					content: [{ type: 'text', text: paragraph.substring(4).trim() }]
-				});
-			} else if (paragraph.startsWith('- ') || paragraph.startsWith('* ')) {
-				// Simple bullet list
-				const items = paragraph
-					.split(/\n/)
-					.filter(
-						(line) =>
-							line.trim().startsWith('- ') || line.trim().startsWith('* ')
-					);
-				const listItems = items.map((item) => {
-					const content = item.replace(/^[-*]\s+/, '').trim();
+				i++;
+				continue;
+			}
+
+			// Check for list
+			if (/^\s*[-*+]\s/.test(line) || /^\s*\d+\.\s/.test(line)) {
+				const listLines = [];
+				while (
+					i < lines.length &&
+					(/^\s*[-*+]\s/.test(lines[i]) || /^\s*\d+\.\s/.test(lines[i]))
+				) {
+					listLines.push(lines[i]);
+					i++;
+				}
+
+				const isOrdered = /^\s*\d+\.\s/.test(listLines[0]);
+				const listItems = listLines.map((listLine) => {
+					const content = isOrdered
+						? listLine.trim().replace(/^\d+\.\s+/, '')
+						: listLine.trim().replace(/^[-*+]\s+/, '');
+
 					return {
 						type: 'listItem',
 						content: [
@@ -237,56 +343,40 @@ export class JiraTicket {
 				});
 
 				nodes.push({
-					type: 'bulletList',
+					type: isOrdered ? 'orderedList' : 'bulletList',
 					content: listItems
 				});
+				continue;
 			}
-			// Check for ordered (numbered) list: 1. item, 2. item, etc.
-			else if (/^\d+\.\s/.test(paragraph)) {
-				const lines = paragraph.split(/\n/);
-				const numberedItems = lines.filter((line) =>
-					/^\d+\.\s/.test(line.trim())
-				);
 
-				if (numberedItems.length > 0) {
-					const listItems = numberedItems.map((item) => {
-						const content = item.replace(/^\d+\.\s+/, '').trim();
-						return {
-							type: 'listItem',
-							content: [
-								{
-									type: 'paragraph',
-									content: this._parseInlineFormatting(content)
-								}
-							]
-						};
-					});
+			// Collect paragraph lines
+			const paragraphLines = [];
+			while (
+				i < lines.length &&
+				lines[i].trim() &&
+				!lines[i].trim().startsWith('```') &&
+				!lines[i].match(/^#{1,6}\s/) &&
+				!/^\s*[-*+]\s/.test(lines[i]) &&
+				!/^\s*\d+\.\s/.test(lines[i])
+			) {
+				paragraphLines.push(lines[i]);
+				i++;
+			}
 
-					nodes.push({
-						type: 'orderedList',
-						content: listItems
-					});
-				} else {
-					// Fall back to regular paragraph if no valid items
-					nodes.push({
-						type: 'paragraph',
-						content: this._parseInlineFormatting(paragraph)
-					});
-				}
-			} else {
-				// Regular paragraph with potential inline formatting
+			if (paragraphLines.length > 0) {
+				const paragraphText = paragraphLines.join('\n');
 				nodes.push({
 					type: 'paragraph',
-					content: this._parseInlineFormatting(paragraph)
+					content: this._parseInlineFormatting(paragraphText)
 				});
 			}
-		});
+		}
 
 		return nodes;
 	}
 
 	/**
-	 * Parse inline text formatting (bold, italic, code, links)
+	 * Enhanced inline formatting parser with better error handling
 	 * @param {string} text - Text to parse for inline formatting
 	 * @returns {Array} - Array of ADF text nodes with appropriate marks
 	 * @private
@@ -294,90 +384,93 @@ export class JiraTicket {
 	_parseInlineFormatting(text) {
 		if (!text) return [{ type: 'text', text: '' }];
 
-		// Simple patterns for inline formatting
+		try {
+			return this._processInlineFormatting(text);
+		} catch (error) {
+			// Fallback to plain text if inline formatting fails
+			console.warn(
+				'Inline formatting parsing failed, falling back to plain text:',
+				error.message
+			);
+			return [{ type: 'text', text }];
+		}
+	}
+
+	/**
+	 * Process inline formatting patterns
+	 * @param {string} text - Text to process
+	 * @returns {Array} - Array of formatted text nodes
+	 * @private
+	 */
+	_processInlineFormatting(text) {
 		const elements = [];
 		let remaining = text;
 
-		// Process text for patterns
+		// Define all patterns with their processors
+		const patterns = [
+			{ regex: /^\*\*(.*?)\*\*/, type: 'strong', priority: 1 },
+			{ regex: /^`([^`\n]+?)`/, type: 'code', priority: 2 }, // Avoid matching triple backticks
+			{ regex: /^\[(.*?)\]\((.*?)\)/, type: 'link', priority: 3 },
+			{ regex: /^\*(.*?)\*/, type: 'em', priority: 4 }
+		];
+
 		while (remaining.length > 0) {
-			// Bold: **text**
-			const boldMatch = remaining.match(/^\*\*(.*?)\*\*/);
-			if (boldMatch) {
-				elements.push({
-					type: 'text',
-					marks: [{ type: 'strong' }],
-					text: boldMatch[1]
-				});
-				remaining = remaining.substring(boldMatch[0].length);
-				continue;
+			let matched = false;
+
+			// Try each pattern in priority order
+			for (const pattern of patterns) {
+				const match = remaining.match(pattern.regex);
+				if (match) {
+					matched = true;
+
+					if (pattern.type === 'link') {
+						elements.push({
+							type: 'text',
+							marks: [
+								{
+									type: 'link',
+									attrs: {
+										href: match[2],
+										title: match[1]
+									}
+								}
+							],
+							text: match[1]
+						});
+					} else {
+						elements.push({
+							type: 'text',
+							marks: [{ type: pattern.type }],
+							text: match[1]
+						});
+					}
+
+					remaining = remaining.substring(match[0].length);
+					break;
+				}
 			}
 
-			// Italic: *text*
-			const italicMatch = remaining.match(/^\*(.*?)\*/);
-			if (italicMatch) {
-				elements.push({
-					type: 'text',
-					marks: [{ type: 'em' }],
-					text: italicMatch[1]
-				});
-				remaining = remaining.substring(italicMatch[0].length);
-				continue;
+			// If no pattern matched, take the next character
+			if (!matched) {
+				const nextChar = remaining.charAt(0);
+
+				// Combine with previous plain text element if possible
+				if (
+					elements.length > 0 &&
+					elements[elements.length - 1].type === 'text' &&
+					(!elements[elements.length - 1].marks ||
+						elements[elements.length - 1].marks.length === 0)
+				) {
+					elements[elements.length - 1].text += nextChar;
+				} else {
+					elements.push({ type: 'text', text: nextChar });
+				}
+
+				remaining = remaining.substring(1);
 			}
-
-			// Inline code: `code`
-			const codeMatch = remaining.match(/^`(.*?)`/);
-			if (codeMatch) {
-				elements.push({
-					type: 'text',
-					marks: [{ type: 'code' }],
-					text: codeMatch[1]
-				});
-				remaining = remaining.substring(codeMatch[0].length);
-				continue;
-			}
-
-			// Link: [text](url)
-			const linkMatch = remaining.match(/^\[(.*?)\]\((.*?)\)/);
-			if (linkMatch) {
-				elements.push({
-					type: 'text',
-					marks: [
-						{
-							type: 'link',
-							attrs: {
-								href: linkMatch[2],
-								title: linkMatch[1]
-							}
-						}
-					],
-					text: linkMatch[1]
-				});
-				remaining = remaining.substring(linkMatch[0].length);
-				continue;
-			}
-
-			// If no patterns match, take the next character as plain text
-			const nextChar = remaining.charAt(0);
-
-			// If we already have a text element, append to it
-			if (
-				elements.length > 0 &&
-				elements[elements.length - 1].type === 'text' &&
-				(!elements[elements.length - 1].marks ||
-					elements[elements.length - 1].marks.length === 0)
-			) {
-				elements[elements.length - 1].text += nextChar;
-			} else {
-				elements.push({
-					type: 'text',
-					text: nextChar
-				});
-			}
-
-			remaining = remaining.substring(1);
 		}
 
-		return elements.length > 0 ? elements : [{ type: 'text', text: text }];
+		return elements.length > 0 ? elements : [{ type: 'text', text }];
 	}
 
 	/**

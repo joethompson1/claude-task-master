@@ -117,28 +117,40 @@ export function registerAddSubtaskTool(server) {
 		server.addTool({
 			name: 'add_jira_subtask',
 			description:
-				'Creates a new subtask under a specified parent issue in Jira',
+				'Creates a new subtask under a specified parent issue in Jira with proper markdown formatting. All text fields support full markdown syntax and are automatically converted to Atlassian Document Format (ADF) for optimal Jira display.',
 			parameters: z.object({
 				parentKey: z
 					.string()
 					.describe("The Jira key of the parent issue (e.g., 'PROJ-123')"),
-				title: z.string().describe('The title/summary for the new subtask'),
+				title: z
+					.string()
+					.describe(
+						'The title/summary for the new subtask (plain text, no markdown)'
+					),
 				description: z
 					.string()
 					.optional()
-					.describe('The description for the subtask'),
+					.describe(
+						'The main description for the subtask. FORMATTING GUIDE: Use markdown syntax - ## for headers, **bold**, *italic*, `inline code`, ```language code blocks```, - for bullet lists, 1. for numbered lists, [link text](url) for links. This will be displayed as the main subtask description in Jira.'
+					),
 				details: z
 					.string()
 					.optional()
-					.describe('The implementation details for the subtask'),
+					.describe(
+						'Implementation details and technical specifications for the subtask. FORMATTING GUIDE: Use markdown for structure - ## Implementation Steps, ### Code Examples, ```javascript code```, **Note:** for emphasis, - Step 1, - Step 2. This content will appear in a blue "Implementation Details" panel in Jira.'
+					),
 				acceptanceCriteria: z
 					.string()
 					.optional()
-					.describe('The acceptance criteria for the subtask'),
+					.describe(
+						'Acceptance criteria and completion requirements for the subtask. FORMATTING GUIDE: Use markdown checklists - [ ] for incomplete items, **Required:** for emphasis, ### Validation Steps for sections. This content will appear in a green "Acceptance Criteria" panel in Jira.'
+					),
 				testStrategy: z
 					.string()
 					.optional()
-					.describe('The test strategy for the subtask'),
+					.describe(
+						'Testing approach for the subtask. FORMATTING GUIDE: Use markdown structure - ## Unit Tests, ```bash test commands```, ### Validation Tests, **Expected:** for outcomes, - Test case 1. This content will appear in a gray "Test Strategy (TDD)" panel in Jira.'
+					),
 				priority: z
 					.string()
 					.optional()

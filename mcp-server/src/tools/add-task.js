@@ -114,13 +114,19 @@ export function registerAddTaskTool(server) {
 		server.addTool({
 			name: 'add_jira_issue',
 			description:
-				'Creates a new issue in Jira, optionally linking it to an Parent',
+				'Creates a new issue in Jira with proper markdown formatting. All text fields support full markdown syntax including headers, lists, code blocks, bold/italic text, and links. The content is automatically converted to Atlassian Document Format (ADF) for optimal Jira display.',
 			parameters: z.object({
-				title: z.string().describe('The title/summary for the new issue'),
+				title: z
+					.string()
+					.describe(
+						'The title/summary for the new issue (plain text, no markdown)'
+					),
 				description: z
 					.string()
 					.optional()
-					.describe('The description for the issue'),
+					.describe(
+						'The main description for the issue. FORMATTING GUIDE: Use markdown syntax - ## for headers, **bold**, *italic*, `inline code`, ```language code blocks```, - for bullet lists, 1. for numbered lists, [link text](url) for links. This will be displayed as the main ticket description in Jira.'
+					),
 				issueType: z
 					.string()
 					.optional()
@@ -130,15 +136,21 @@ export function registerAddTaskTool(server) {
 				details: z
 					.string()
 					.optional()
-					.describe('The implementation details for the issue'),
+					.describe(
+						'Implementation details and technical specifications. FORMATTING GUIDE: Use markdown for structure - ## Implementation Steps, ### Database Schema, ```sql code```, **Important:** notes, - Step 1, - Step 2. This content will appear in a blue "Implementation Details" panel in Jira for clear separation from the main description.'
+					),
 				acceptanceCriteria: z
 					.string()
 					.optional()
-					.describe('The acceptance criteria for the issue'),
+					.describe(
+						'Acceptance criteria and requirements that must be met. FORMATTING GUIDE: Use markdown checklists - [ ] for incomplete items, **Must have:** for emphasis, ### Additional Requirements for sections. This content will appear in a green "Acceptance Criteria" panel in Jira to highlight completion requirements.'
+					),
 				testStrategy: z
 					.string()
 					.optional()
-					.describe('The test strategy for the issue'),
+					.describe(
+						'Testing approach and strategy. FORMATTING GUIDE: Use markdown structure - ## Unit Tests, ```bash test commands```, ### Performance Tests, **Target:** for goals, - Test case 1. This content will appear in a gray "Test Strategy (TDD)" panel in Jira for clear testing guidance.'
+					),
 				parentKey: z
 					.string()
 					.optional()
