@@ -28,8 +28,9 @@ export class ContextAggregator {
   async aggregateContext(issueKey, options = {}) {
     const {
       depth = 2,
-      includeTypes = ['parent', 'child', 'epic', 'dependency', 'relates'],
-      repoSlug = process.env.BITBUCKET_DEFAULT_REPO,
+      includeTypes = ['parent', 'child', 'epic', 'story', 'dependency', 'relates'],
+      repoSlug = null, // Let PR matcher search across all repositories
+      detectedRepositories = [], // Repository names detected from main ticket's development info
       maxAge = this.config.maxAgeMonths,
       maxRelated = this.config.maxRelated,
       log = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} }
@@ -48,6 +49,7 @@ export class ContextAggregator {
         depth,
         includeTypes,
         repoSlug,
+        detectedRepositories,
         maxAge,
         maxRelated,
         log
@@ -75,7 +77,7 @@ export class ContextAggregator {
    * @returns {Object} Full context object
    */
   async buildFullContext(issueKey, options) {
-    const { depth, includeTypes, repoSlug, maxAge, maxRelated, log } = options;
+    const { depth, includeTypes, repoSlug, detectedRepositories = [], maxAge, maxRelated, log } = options;
 
     // 1. Get relationship graph from JiraRelationshipResolver
     const relationships = await this.jiraResolver.resolveRelationships(issueKey, {
@@ -84,45 +86,75 @@ export class ContextAggregator {
       log // Pass the logger to the relationship resolver
     });
 
-    // Add debug information about the relationship resolution
-    const debugInfo = {
-      relationshipsExists: !!relationships,
-      relationshipsSuccess: relationships?.success,
-      relationshipsHasData: !!relationships?.data,
-      relationshipsHasRelationships: !!relationships?.data?.relationships,
-      relationshipsCount: relationships?.data?.relationships?.length || 0,
-      relationshipsError: relationships?.error,
-      fullRelationshipsObject: relationships
-    };
-
     if (!relationships || !relationships.success || !relationships.data || !relationships.data.relationships) {
-      const failureDebugInfo = {
-        ...debugInfo,
-        reason: 'No relationships found or relationship resolution failed',
-        failurePoint: !relationships ? 'no_relationships' : 
-                     !relationships.success ? 'not_success' :
-                     !relationships.data ? 'no_data' :
-                     !relationships.data.relationships ? 'no_relationships_array' : 'unknown'
-      };
-      return this.createEmptyContext(issueKey, failureDebugInfo);
+      return this.createEmptyContext(issueKey);
     }
 
     // 2. Batch fetch PRs for all related tickets in parallel
     const ticketKeys = relationships.data.relationships.map(r => r.issueKey);
-    const prPromises = ticketKeys.map(key =>
-      this.prMatcher.findPRsForTicket(key, { repoSlug })
-        .catch(error => {
-          console.warn(`Failed to fetch PRs for ${key}: ${error.message}`);
-          return []; // Return empty array on failure
-        })
-    );
+    
+    // Use detected repositories for smarter PR searches
+    const prPromises = ticketKeys.map(async key => {
+      try {
+        // If we have detected repositories, try each one
+        if (detectedRepositories && detectedRepositories.length > 0) {
+          let allPRs = [];
+          
+          // Search in each detected repository
+          for (const repo of detectedRepositories) {
+            try {
+              const repoResult = await this.prMatcher.findPRsForTicket(key, repo);
+              if (repoResult.success && repoResult.data && repoResult.data.pullRequests) {
+                allPRs.push(...repoResult.data.pullRequests);
+              }
+            } catch (repoError) {
+              log.warn(`Failed to search repository ${repo} for ${key}: ${repoError.message}`);
+            }
+          }
+          
+          // If we found PRs in detected repos, return them
+          if (allPRs.length > 0) {
+            return { success: true, data: { pullRequests: allPRs } };
+          }
+        }
+        
+        // Fallback: search without specific repository (uses dev-status API)
+        if (!repoSlug) {
+          return await this.prMatcher.findPRsForTicket(key, null);
+        } else {
+          return await this.prMatcher.findPRsForTicket(key, repoSlug);
+        }
+      } catch (error) {
+        console.warn(`Failed to fetch PRs for ${key}: ${error.message}`);
+        return { success: false, data: { pullRequests: [] } }; // Return structured response on failure
+      }
+    });
 
     const prResults = await Promise.allSettled(prPromises);
 
     // 3. Combine relationship data with PR data
     const enrichedTickets = relationships.data.relationships.map((relationship, index) => {
       const prResult = prResults[index];
-      const pullRequests = prResult.status === 'fulfilled' ? prResult.value : [];
+      
+      let pullRequests = [];
+      if (prResult.status === 'fulfilled' && prResult.value) {
+        if (prResult.value.success && prResult.value.data && prResult.value.data.pullRequests) {
+          pullRequests = prResult.value.data.pullRequests;
+          // Debug: Log PR data details
+          if (pullRequests.length > 0 && relationship.issue.jiraKey === 'GROOT-287') {
+            console.log(`\n🔍 DEBUG: PR data for ${relationship.issue.jiraKey}:`);
+            pullRequests.forEach(pr => {
+              console.log(`   PR ${pr.id}:`);
+              console.log(`     Has diffStat: ${!!pr.diffStat}`);
+              console.log(`     Has filesChanged: ${!!pr.filesChanged}`);
+              console.log(`     filesChanged length: ${pr.filesChanged?.length || 0}`);
+            });
+          }
+        } else if (Array.isArray(prResult.value)) {
+          // Fallback for old format
+          pullRequests = prResult.value;
+        }
+      }
       
       return {
         ticket: relationship.issue,
@@ -135,6 +167,9 @@ export class ContextAggregator {
 
     // 4. Apply intelligent filtering
     const filteredTickets = this.applyIntelligentFiltering(enrichedTickets, maxAge, maxRelated);
+    
+    // Track unique tickets before and after filtering for accurate filteredOut count
+    const uniqueTicketsBefore = new Set(enrichedTickets.map(t => t.ticket.jiraKey)).size;
 
     // 5. Calculate relevance scores
     const scoredTickets = filteredTickets.map(ticket => ({
@@ -146,7 +181,7 @@ export class ContextAggregator {
     const finalTickets = this.limitContextSize(scoredTickets, maxRelated);
 
     // 7. Generate summary and insights
-    const summary = this.generateSummary(finalTickets, enrichedTickets.length);
+    const summary = this.generateSummary(finalTickets, uniqueTicketsBefore);
     const contextSummary = this.generateContextSummary(finalTickets, summary);
 
     return {
@@ -161,13 +196,6 @@ export class ContextAggregator {
         contextGeneratedAt: new Date().toISOString(),
         repoSlug,
         filteringApplied: enrichedTickets.length > finalTickets.length
-      },
-      debugInfo: {
-        ...debugInfo,
-        enrichedTicketsCount: enrichedTickets.length,
-        finalTicketsCount: finalTickets.length,
-        relationshipsMetadata: relationships.metadata,
-        rawRelationships: relationships.data.relationships
       }
     };
   }
@@ -191,21 +219,40 @@ export class ContextAggregator {
         return this.createEmptyContext(issueKey);
       }
 
-      // Convert to enriched format without PRs
-      const enrichedTickets = relationships.relationships.map(relationship => ({
-        ticket: relationship.issue,
-        relationship: relationship.relationship,
-        direction: relationship.direction,
-        depth: relationship.depth,
-        pullRequests: [],
-        relevanceScore: this.calculateRelevanceScore(relationship.issue, [], relationship.relationship)
+      // Convert to enriched format and try to get PRs from Jira dev status API
+      const enrichedTickets = await Promise.all(relationships.relationships.map(async relationship => {
+        let pullRequests = [];
+        
+        // Try to get PRs from Jira development status API (doesn't require Bitbucket configuration)
+        if (this.prMatcher) {
+          try {
+            const prResult = await this.prMatcher.findPRsForTicket(relationship.issueKey, null);
+            if (prResult.success && prResult.data && prResult.data.pullRequests) {
+              pullRequests = prResult.data.pullRequests;
+            }
+          } catch (error) {
+            // Silently ignore PR fetch errors in fallback mode
+            console.debug(`Could not fetch PRs for ${relationship.issueKey} in fallback mode: ${error.message}`);
+          }
+        }
+        
+        return {
+          ticket: relationship.issue,
+          relationship: relationship.relationship,
+          direction: relationship.direction,
+          depth: relationship.depth,
+          pullRequests,
+          relevanceScore: this.calculateRelevanceScore(relationship.issue, pullRequests, relationship.relationship)
+        };
       }));
 
       // Apply basic filtering and limiting
       const filteredTickets = this.filterByRecency(enrichedTickets, maxAge);
       const finalTickets = this.limitContextSize(filteredTickets, maxRelated);
 
-      const summary = this.generateSummary(finalTickets, enrichedTickets.length);
+      // Track unique tickets for accurate filteredOut count
+      const uniqueTicketsBefore = new Set(enrichedTickets.map(t => t.ticket.jiraKey)).size;
+      const summary = this.generateSummary(finalTickets, uniqueTicketsBefore);
       const contextSummary = this.generateContextSummary(finalTickets, summary);
 
       return {
@@ -236,8 +283,11 @@ export class ContextAggregator {
    * @returns {Array} Filtered tickets
    */
   applyIntelligentFiltering(tickets, maxAge, maxRelated) {
-    // First filter by recency
-    const recentTickets = this.filterByRecency(tickets, maxAge);
+    // First deduplicate tickets by jiraKey, keeping the highest priority relationship
+    const deduplicatedTickets = this.deduplicateTickets(tickets);
+    
+    // Then filter by recency
+    const recentTickets = this.filterByRecency(deduplicatedTickets, maxAge);
     
     // Then apply additional relevance-based filtering if needed
     if (recentTickets.length <= maxRelated) {
@@ -246,6 +296,120 @@ export class ContextAggregator {
 
     // If we still have too many, prioritize by relationship type and status
     return this.prioritizeByImportance(recentTickets, maxRelated);
+  }
+
+  /**
+   * Deduplicate tickets by jiraKey, keeping the highest priority relationship
+   * @param {Array} tickets - Array of ticket objects
+   * @returns {Array} Deduplicated tickets
+   */
+  deduplicateTickets(tickets) {
+    // Priority order: parent > child > epic > story > dependency > relates
+    const relationshipPriority = {
+      'parent': 100,
+      'child': 90,
+      'epic': 80,
+      'story': 75,
+      'dependency': 70,
+      'blocks': 65,
+      'blocked': 65,
+      'relates': 60
+    };
+
+    const ticketMap = new Map();
+
+    for (const ticketData of tickets) {
+      const jiraKey = ticketData.ticket.jiraKey;
+      const currentPriority = relationshipPriority[ticketData.relationship] || 50;
+
+      if (!ticketMap.has(jiraKey)) {
+        // First time seeing this ticket
+        ticketMap.set(jiraKey, ticketData);
+      } else {
+        // Ticket already exists, check if current relationship has higher priority
+        const existingTicket = ticketMap.get(jiraKey);
+        const existingPriority = relationshipPriority[existingTicket.relationship] || 50;
+
+        if (currentPriority > existingPriority) {
+          // Current relationship has higher priority, but preserve PR data from both
+          const mergedTicket = {
+            ...ticketData,
+            pullRequests: this.mergePullRequests(existingTicket.pullRequests || [], ticketData.pullRequests || [])
+          };
+          ticketMap.set(jiraKey, mergedTicket);
+        } else {
+          // Keep existing ticket but merge PR data
+          const existingWithMergedPRs = {
+            ...existingTicket,
+            pullRequests: this.mergePullRequests(existingTicket.pullRequests || [], ticketData.pullRequests || [])
+          };
+          ticketMap.set(jiraKey, existingWithMergedPRs);
+        }
+      }
+    }
+
+    return Array.from(ticketMap.values());
+  }
+
+  /**
+   * Merge pull requests from multiple sources, preserving the most detailed version of each PR
+   * @param {Array} existingPRs - Existing pull requests
+   * @param {Array} newPRs - New pull requests to merge
+   * @returns {Array} Merged pull requests array
+   */
+  mergePullRequests(existingPRs, newPRs) {
+    if (!existingPRs || existingPRs.length === 0) {
+      return newPRs || [];
+    }
+    if (!newPRs || newPRs.length === 0) {
+      return existingPRs;
+    }
+
+    const prMap = new Map();
+    
+    // Add existing PRs to map
+    existingPRs.forEach(pr => {
+      if (pr.id) {
+        prMap.set(pr.id, pr);
+      }
+    });
+    
+    // Add/merge new PRs, preferring more detailed versions
+    newPRs.forEach(pr => {
+      if (pr.id) {
+        const existingPR = prMap.get(pr.id);
+        if (!existingPR) {
+          // New PR, add it
+          prMap.set(pr.id, pr);
+        } else {
+          // PR exists, merge keeping the most detailed version
+          // Prefer PR with diffstat/filesChanged data
+          const hasNewDiffstat = pr.diffStat || pr.filesChanged;
+          const hasExistingDiffstat = existingPR.diffStat || existingPR.filesChanged;
+          
+          if (hasNewDiffstat && !hasExistingDiffstat) {
+            // New PR has diffstat, existing doesn't - use new
+            prMap.set(pr.id, pr);
+          } else if (!hasNewDiffstat && hasExistingDiffstat) {
+            // Keep existing PR with diffstat
+            // Do nothing
+          } else {
+            // Both have diffstat or neither has it - merge properties
+            prMap.set(pr.id, {
+              ...existingPR,
+              ...pr,
+              // Preserve detailed data from whichever has it
+              diffStat: pr.diffStat || existingPR.diffStat,
+              filesChanged: pr.filesChanged || existingPR.filesChanged,
+              commits: pr.commits || existingPR.commits,
+              branchInfo: pr.branchInfo || existingPR.branchInfo
+            });
+          }
+        }
+      }
+    });
+    
+    return Array.from(prMap.values());
   }
 
   /**
@@ -261,7 +425,16 @@ export class ContextAggregator {
     return tickets.filter(ticketData => {
       const ticket = ticketData.ticket;
       const pullRequests = ticketData.pullRequests || [];
+      const relationship = ticketData.relationship;
 
+      // Always preserve essential relationship types regardless of age
+      // These provide crucial hierarchical context
+      if (['parent', 'epic', 'child'].includes(relationship)) {
+        return true;
+      }
+
+      // For other relationships, apply age filtering
+      
       // Check ticket dates
       const ticketDate = this.getTicketDate(ticket);
       if (ticketDate && ticketDate > cutoffDate) {
@@ -426,10 +599,10 @@ export class ContextAggregator {
   /**
    * Generate summary statistics
    * @param {Array} finalTickets - Final filtered tickets
-   * @param {number} originalCount - Original ticket count before filtering
+   * @param {number} uniqueOriginalCount - Count of unique tickets before filtering (excluding duplicates)
    * @returns {Object} Summary object
    */
-  generateSummary(finalTickets, originalCount) {
+  generateSummary(finalTickets, uniqueOriginalCount) {
     const totalPRs = finalTickets.reduce((acc, t) => acc + (t.pullRequests?.length || 0), 0);
     const mergedPRs = finalTickets.reduce((acc, t) => {
       return acc + (t.pullRequests?.filter(pr => pr.status === 'MERGED')?.length || 0);
@@ -445,9 +618,12 @@ export class ContextAggregator {
       ? Math.round(finalTickets.reduce((acc, t) => acc + (t.relevanceScore || 0), 0) / finalTickets.length)
       : 0;
 
+    // Calculate actual unique tickets in final result
+    const uniqueFinalCount = new Set(finalTickets.map(t => t.ticket.jiraKey)).size;
+
     return {
       totalRelated: finalTickets.length,
-      filteredOut: originalCount - finalTickets.length,
+      filteredOut: uniqueOriginalCount - uniqueFinalCount, // Only count actually removed unique tickets
       completedWork: statusCounts['Done'] || 0,
       activeWork: (statusCounts['In Progress'] || 0) + (statusCounts['Review'] || 0) + (statusCounts['Testing'] || 0),
       totalPRs,
@@ -582,8 +758,8 @@ export class ContextAggregator {
    * @param {Object} debugInfo - Optional debug information
    * @returns {Object} Empty context object
    */
-  createEmptyContext(issueKey, debugInfo = null) {
-    const result = {
+  createEmptyContext(issueKey) {
+    return {
       sourceTicket: { key: issueKey },
       relatedContext: {
         tickets: [],
@@ -611,12 +787,6 @@ export class ContextAggregator {
         relationshipTypes: []
       }
     };
-
-    if (debugInfo) {
-      result.debugInfo = debugInfo;
-    }
-
-    return result;
   }
 
   // Cache Management Methods

@@ -41,6 +41,191 @@ function processTaskResponse(data) {
 }
 
 /**
+ * Relationship priority mapping for determining primary relationship
+ */
+const RELATIONSHIP_PRIORITY = {
+	'subtask': 1,
+	'dependency': 2, 
+	'child': 3,
+	'parent': 4,
+	'blocks': 5,
+	'related': 6
+};
+
+/**
+ * Deduplicate tickets from subtasks and related context into a unified structure
+ * @param {Array} subtasks - Array of subtask objects
+ * @param {Object} relatedContext - Related context with tickets array
+ * @param {Object} log - Logger instance
+ * @returns {Object} - Unified structure with deduplicated tickets
+ */
+function deduplicateTickets(subtasks, relatedContext, log) {
+	const ticketMap = new Map();
+	
+	// Helper function to add or merge relationships
+	const addTicketWithRelationship = (ticket, relationship) => {
+		const ticketId = ticket.jiraKey || ticket.id;
+		if (!ticketId) {
+			log.warn('Ticket found without ID, skipping');
+			return;
+		}
+		
+		if (ticketMap.has(ticketId)) {
+			// Merge relationships
+			const existing = ticketMap.get(ticketId);
+			const newRelationships = [...existing.relationships];
+			
+			// Check if this relationship type already exists
+			const existingRelType = newRelationships.find(r => r.type === relationship.type);
+			if (!existingRelType) {
+				newRelationships.push(relationship);
+			}
+			
+			// Update primary relationship if this one has higher priority
+			const currentPrimaryPriority = RELATIONSHIP_PRIORITY[existing.relationships.find(r => r.primary)?.type] || 999;
+			const newRelationshipPriority = RELATIONSHIP_PRIORITY[relationship.type] || 999;
+			
+			if (newRelationshipPriority < currentPrimaryPriority) {
+				// Set all existing to non-primary
+				newRelationships.forEach(r => r.primary = false);
+				// Set new one as primary
+				const newRel = newRelationships.find(r => r.type === relationship.type);
+				if (newRel) newRel.primary = true;
+			}
+			
+			existing.relationships = newRelationships;
+			
+			// Merge pull requests - preserve the most detailed version
+			const newPRs = ticket.pullRequests || [];
+			if (newPRs.length > 0) {
+				// Merge PRs by ID, keeping the most detailed version
+				const prMap = new Map();
+				
+				// Add existing PRs to map
+				(existing.pullRequests || []).forEach(pr => {
+					if (pr.id) {
+						prMap.set(pr.id, pr);
+					}
+				});
+				
+				// Add/merge new PRs, preferring more detailed versions
+				newPRs.forEach(pr => {
+					if (pr.id) {
+						const existingPR = prMap.get(pr.id);
+						if (!existingPR) {
+							// New PR, add it
+							prMap.set(pr.id, pr);
+						} else {
+							// PR exists, merge keeping the most detailed version
+							// Prefer PR with diffstat/filesChanged data
+							const hasNewDiffstat = pr.diffStat || pr.filesChanged;
+							const hasExistingDiffstat = existingPR.diffStat || existingPR.filesChanged;
+							
+							if (hasNewDiffstat && !hasExistingDiffstat) {
+								// New PR has diffstat, existing doesn't - use new
+								prMap.set(pr.id, pr);
+							} else if (!hasNewDiffstat && hasExistingDiffstat) {
+								// Keep existing PR with diffstat
+								// Do nothing
+							} else {
+								// Both have diffstat or neither has it - merge properties
+								prMap.set(pr.id, {
+									...existingPR,
+									...pr,
+									// Preserve detailed data from whichever has it
+									diffStat: pr.diffStat || existingPR.diffStat,
+									filesChanged: pr.filesChanged || existingPR.filesChanged,
+									commits: pr.commits || existingPR.commits
+								});
+							}
+						}
+					}
+				});
+				
+				existing.pullRequests = Array.from(prMap.values());
+			}
+		} else {
+			// Add new ticket
+			ticketMap.set(ticketId, {
+				ticket,
+				relationships: [{
+					...relationship,
+					primary: true
+				}],
+				pullRequests: ticket.pullRequests || [],
+				relevanceScore: ticket.relevanceScore || 100
+			});
+		}
+	};
+	
+	// Process subtasks first (highest priority)
+	if (subtasks && Array.isArray(subtasks)) {
+		subtasks.forEach(subtask => {
+			addTicketWithRelationship(subtask, {
+				type: 'subtask',
+				direction: 'child',
+				depth: 1
+			});
+		});
+		log.info(`Processed ${subtasks.length} subtasks`);
+	}
+	
+	// Process related context tickets
+	if (relatedContext && relatedContext.tickets && Array.isArray(relatedContext.tickets)) {
+		relatedContext.tickets.forEach(contextItem => {
+			const ticket = contextItem.ticket;
+			if (ticket) {
+				// Create a ticket object with PR data attached for proper merging
+				const ticketWithPRs = {
+					...ticket,
+					pullRequests: contextItem.pullRequests || [],
+					relevanceScore: contextItem.relevanceScore || 100
+				};
+				
+				addTicketWithRelationship(ticketWithPRs, {
+					type: contextItem.relationship || 'related',
+					direction: contextItem.direction || 'unknown',
+					depth: contextItem.depth || 1
+				});
+			}
+		});
+		log.info(`Processed ${relatedContext.tickets.length} related context tickets`);
+	}
+	
+	// Convert map to array and calculate summary
+	const relatedTickets = Array.from(ticketMap.values());
+	
+	// Calculate relationship summary
+	const relationshipSummary = {
+		subtasks: relatedTickets.filter(t => t.relationships.some(r => r.type === 'subtask')).length,
+		dependencies: relatedTickets.filter(t => t.relationships.some(r => r.type === 'dependency')).length,
+		relatedTickets: relatedTickets.filter(t => t.relationships.some(r => r.type === 'related')).length,
+		totalUnique: relatedTickets.length
+	};
+	
+	// Preserve original context summary if available
+	const contextSummary = relatedContext?.summary || {
+		overview: `Found ${relationshipSummary.totalUnique} unique related tickets`,
+		recentActivity: "No activity information available",
+		completedWork: `${relatedTickets.filter(t => t.ticket.status === 'done' || t.ticket.status === 'Done').length} tickets completed`,
+		implementationInsights: []
+	};
+	
+	log.info(`Deduplicated to ${relationshipSummary.totalUnique} unique tickets from ${(subtasks?.length || 0) + (relatedContext?.tickets?.length || 0)} total`);
+	
+	return {
+		relatedTickets,
+		relationshipSummary,
+		contextSummary
+	};
+}
+
+/**
+ * Export the deduplicateTickets function for testing
+ */
+export { deduplicateTickets };
+
+/**
  * Register the get-task tool with the MCP server
  * @param {Object} server - FastMCP server instance
  */
@@ -66,60 +251,38 @@ export function registerShowTaskTool(server) {
 						'Absolute path to the project root directory (Optional, usually from session)'
 					)
 			}),
-			execute: withNormalizedProjectRoot(async (args, { log }) => {
-				const { id, file, status, projectRoot } = args;
-
-				try {
-					log.info(
-						`Getting task details for ID: ${id}${status ? ` (filtering subtasks by status: ${status})` : ''} in root: ${projectRoot}`
-					);
-
-					// Resolve the path to tasks.json using the NORMALIZED projectRoot from args
-					let tasksJsonPath;
+			execute: withNormalizedProjectRoot(
+				async (args, { log, session }, projectRoot) => {
 					try {
-						tasksJsonPath = findTasksJsonPath(
-							{ projectRoot: projectRoot, file: file },
+						log.info(`Session object received in execute: ${JSON.stringify(session)}`);
+
+						log.info(`Getting task details for ID: ${args.id}`);
+
+						const result = await showTaskDirect(
+							{
+								...args,
+								projectRoot
+							},
 							log
 						);
-						log.info(`Resolved tasks path: ${tasksJsonPath}`);
+
+						if (result.success) {
+							// Ensure we return just the task data without allTasks
+							const processedData = processTaskResponse(result.data);
+							log.info(`Successfully retrieved task ${args.id}.`);
+							return handleApiResult({ ...result, data: processedData }, log);
+						} else {
+							log.error(
+								`Failed to get task: ${result.error?.message || 'Unknown error'}`
+							);
+							return handleApiResult(result, log);
+						}
 					} catch (error) {
-						log.error(`Error finding tasks.json: ${error.message}`);
-						return createErrorResponse(
-							`Failed to find tasks.json: ${error.message}`
-						);
+						log.error(`Error in get-task tool: ${error.message}`);
+						return createErrorResponse(error.message);
 					}
-
-					// Call the direct function, passing the normalized projectRoot
-					const result = await showTaskDirect(
-						{
-							tasksJsonPath: tasksJsonPath,
-							id: id,
-							status: status,
-							projectRoot: projectRoot
-						},
-						log
-					);
-
-					if (result.success) {
-						log.info(
-							`Successfully retrieved task details for ID: ${args.id}${result.fromCache ? ' (from cache)' : ''}`
-						);
-					} else {
-						log.error(`Failed to get task: ${result.error.message}`);
-					}
-
-					// Use our custom processor function
-					return handleApiResult(
-						result,
-						log,
-						'Error retrieving task details',
-						processTaskResponse
-					);
-				} catch (error) {
-					log.error(`Error in get-task tool: ${error.message}\n${error.stack}`);
-					return createErrorResponse(`Failed to get task: ${error.message}`);
 				}
-			})
+			)
 		});
 	} else {
 		server.addTool({
@@ -147,13 +310,20 @@ export function registerShowTaskTool(server) {
 					.boolean()
 					.optional()
 					.default(true)
-					.describe('If true, will include related tickets and PR context (default: true)')
+					.describe('If true, will include related tickets and PR context (default: true)'),
+				maxRelatedTickets: z
+					.number()
+					.min(1)
+					.max(50)
+					.optional()
+					.default(10)
+					.describe('Maximum number of related tickets to fetch in context (default: 10, max: 50)')
 			}),
 			execute: async (args, { log, session }) => {
 				log.info(`Session object received in execute: ${JSON.stringify(session)}`);
 
 				try {
-					log.info(`Getting Jira task details for ID: ${args.id}${args.includeImages === false ? ' (excluding images)' : ''}${args.includeContext === false ? ' (excluding context)' : ''}`);
+					log.info(`Getting Jira task details for ID: ${args.id}${args.includeImages === false ? ' (excluding images)' : ''}${args.includeContext === false ? ' (excluding context)' : args.maxRelatedTickets !== 10 ? ` (max ${args.maxRelatedTickets} related)` : ''}`);
 
 					// Get the base task data first
 					const result = await showJiraTaskDirect(
@@ -172,19 +342,29 @@ export function registerShowTaskTool(server) {
 					// Add context if requested and available
 					if (args.includeContext !== false) {
 						try {
-							// Add debug info to the ticket so we can see it in the response
-							result.data.task.contextDebug = { started: true, timestamp: new Date().toISOString() };
-							await addContextToTask(result.data.task, args.id, log);
+							await addContextToTask(result.data.task, args.id, args.maxRelatedTickets, args.withSubtasks, log);
 						} catch (contextError) {
 							// Context failure should not break the main functionality
 							log.warn(`Failed to add context to task ${args.id}: ${contextError.message}`);
-							result.data.task.contextDebug = { 
-								...result.data.task.contextDebug, 
-								error: contextError.message,
-								stack: contextError.stack 
-							};
 							// Continue without context
 						}
+					}
+
+					// Extract context images before formatting response
+					let contextImages = [];
+					if (result.data.task._contextImages && result.data.task._contextImages.length > 0) {
+						contextImages = result.data.task._contextImages;
+						// Clean up the temporary context images from the ticket object BEFORE JSON.stringify
+						delete result.data.task._contextImages;
+					}
+
+					// Debug: Log main ticket PR data before serialization
+					if (result.data.task.pullRequests && result.data.task.pullRequests.length > 0) {
+						log.info(`Main ticket has ${result.data.task.pullRequests.length} PRs before serialization`);
+						const firstPR = result.data.task.pullRequests[0];
+						log.info(`First PR ${firstPR.id}: diffStat=${JSON.stringify(firstPR.diffStat)}, filesChanged=${firstPR.filesChanged ? firstPR.filesChanged.length : 0} files`);
+					} else {
+						log.warn(`Main ticket has NO PRs before serialization!`);
 					}
 
 					// Rest of existing response formatting logic...
@@ -196,7 +376,7 @@ export function registerShowTaskTool(server) {
 							: String(result.data.task)
 					});
 
-					// Add each image to the content array (only if images were fetched)
+					// Add main ticket images to the content array
 					if (result.data.images && result.data.images.length > 0) {
 						for (let i = 0; i < result.data.images.length; i++) {
 							const imageData = result.data.images[i];
@@ -204,7 +384,27 @@ export function registerShowTaskTool(server) {
 							// Add image description - filename should now be directly on imageData
 							content.push({
 								type: 'text',
-								text: `Image ${i + 1}: ${imageData.filename || 'Unknown filename'} (${imageData.mimeType}, ${Math.round(imageData.size / 1024)}KB${imageData.isThumbnail ? ', thumbnail' : ''})`
+								text: `Main Ticket Image ${i + 1}: ${imageData.filename || 'Unknown filename'} (${imageData.mimeType}, ${Math.round(imageData.size / 1024)}KB${imageData.isThumbnail ? ', thumbnail' : ''})`
+							});
+
+							// Add the actual image
+							content.push({
+								type: 'image',
+								data: imageData.base64,
+								mimeType: imageData.mimeType
+							});
+						}
+					}
+
+					// Add context images to the content array
+					if (contextImages.length > 0) {
+						for (let i = 0; i < contextImages.length; i++) {
+							const imageData = contextImages[i];
+
+							// Add image description with source ticket info
+							content.push({
+								type: 'text',
+								text: `Context Image ${i + 1} from ${imageData.sourceTicket} (${imageData.sourceTicketSummary}): ${imageData.filename || 'Unknown filename'} (${imageData.mimeType}, ${Math.round(imageData.size / 1024)}KB${imageData.isThumbnail ? ', thumbnail' : ''})`
 							});
 
 							// Add the actual image
@@ -227,157 +427,207 @@ export function registerShowTaskTool(server) {
 }
 
 /**
+ * Extract attachment images from context tickets and remove them from the context
+ * @param {Object} relatedContext - The related context object containing tickets
+ * @param {Object} log - Logger instance
+ * @returns {Array} Array of extracted image objects
+ */
+function extractAndRemoveContextImages(relatedContext, log) {
+	const contextImages = [];
+	
+	if (!relatedContext || !relatedContext.tickets) {
+		return contextImages;
+	}
+	
+	// Process each context ticket
+	relatedContext.tickets.forEach((contextTicketWrapper, ticketIndex) => {
+		// The structure is: contextTicketWrapper.ticket.attachmentImages
+		// We need to check and remove from the nested ticket object
+		if (contextTicketWrapper.ticket && contextTicketWrapper.ticket.attachmentImages && Array.isArray(contextTicketWrapper.ticket.attachmentImages)) {
+			const imageCount = contextTicketWrapper.ticket.attachmentImages.length;
+			
+			// Extract images and add metadata about source ticket
+			contextTicketWrapper.ticket.attachmentImages.forEach((image, imageIndex) => {
+				contextImages.push({
+					...image,
+					sourceTicket: contextTicketWrapper.ticket.key || `context-ticket-${ticketIndex}`,
+					sourceTicketSummary: contextTicketWrapper.ticket.summary || 'Unknown',
+					contextIndex: ticketIndex,
+					imageIndex: imageIndex
+				});
+			});
+			
+			// Remove the attachmentImages array from the nested ticket object
+			delete contextTicketWrapper.ticket.attachmentImages;
+			log.info(`Extracted ${imageCount} images from context ticket ${contextTicketWrapper.ticket.key}`);
+		}
+		
+		// Also check the wrapper level (for backwards compatibility)
+		if (contextTicketWrapper.attachmentImages && Array.isArray(contextTicketWrapper.attachmentImages)) {
+			const imageCount = contextTicketWrapper.attachmentImages.length;
+			
+			// Extract images and add metadata about source ticket
+			contextTicketWrapper.attachmentImages.forEach((image, imageIndex) => {
+				contextImages.push({
+					...image,
+					sourceTicket: contextTicketWrapper.key || `context-ticket-${ticketIndex}`,
+					sourceTicketSummary: contextTicketWrapper.summary || 'Unknown',
+					contextIndex: ticketIndex,
+					imageIndex: imageIndex
+				});
+			});
+			
+			// Remove the attachmentImages array from the wrapper
+			delete contextTicketWrapper.attachmentImages;
+			log.info(`Extracted ${imageCount} images from context ticket wrapper ${contextTicketWrapper.key}`);
+		}
+	});
+	
+	return contextImages;
+}
+
+/**
  * Add context to a JiraTicket if context services are available
  * @param {JiraTicket} ticket - The ticket to enhance with context
  * @param {string} ticketId - The ticket ID for context lookup
+ * @param {number} maxRelatedTickets - Maximum number of related tickets to fetch
+ * @param {boolean} withSubtasks - Whether subtasks are included
  * @param {Object} log - Logger instance
  */
-async function addContextToTask(ticket, ticketId, log) {
+async function addContextToTask(ticket, ticketId, maxRelatedTickets, withSubtasks, log) {
 	try {
-		log.info(`[DEBUG] Starting addContextToTask for ticket ${ticketId}`);
-		ticket.contextDebug = { ...ticket.contextDebug, step: 'starting' };
-		
 		// Check if context services are available
-		log.info(`[DEBUG] Creating JiraClient...`);
 		const jiraClient = new JiraClient();
-		log.info(`[DEBUG] JiraClient created, checking if ready...`);
-		ticket.contextDebug = { ...ticket.contextDebug, step: 'jira_client_check', jiraReady: jiraClient.isReady() };
-		
 		if (!jiraClient.isReady()) {
-			log.warn(`[DEBUG] Jira client not ready, skipping context`);
-			ticket.contextDebug = { ...ticket.contextDebug, step: 'jira_not_ready', reason: 'Jira client not ready' };
+			log.info('Jira client not ready, skipping context');
 			return;
 		}
-		log.info(`[DEBUG] ✅ Jira client is ready`);
 
-		log.info(`[DEBUG] Creating BitbucketClient...`);
 		const bitbucketClient = new BitbucketClient();
-		log.info(`[DEBUG] BitbucketClient created, checking if ready...`);
-		log.info(`[DEBUG] BitbucketClient.enabled: ${bitbucketClient.enabled}`);
-		log.info(`[DEBUG] BitbucketClient.client: ${!!bitbucketClient.client}`);
-		log.info(`[DEBUG] BitbucketClient.error: ${bitbucketClient.error}`);
-		
-		// Add environment variable debugging
-		const bitbucketEnvVars = {
-			BITBUCKET_WORKSPACE: process.env.BITBUCKET_WORKSPACE,
-			BITBUCKET_USERNAME: process.env.BITBUCKET_USERNAME,
-			BITBUCKET_API_TOKEN: process.env.BITBUCKET_API_TOKEN ? '[SET]' : '[NOT SET]',
-			BITBUCKET_DEFAULT_REPO: process.env.BITBUCKET_DEFAULT_REPO
-		};
-		
-		// Test the static method directly
-		let staticEnabledCheck, staticConfig;
-		try {
-			staticEnabledCheck = BitbucketClient.isBitbucketEnabled();
-			staticConfig = BitbucketClient.getBitbucketConfig();
-		} catch (staticError) {
-			staticEnabledCheck = `ERROR: ${staticError.message}`;
-			staticConfig = `ERROR: ${staticError.message}`;
-		}
-		
-		ticket.contextDebug = { 
-			...ticket.contextDebug, 
-			step: 'bitbucket_client_check', 
-			bitbucketEnabled: bitbucketClient.enabled,
-			bitbucketHasClient: !!bitbucketClient.client,
-			bitbucketError: bitbucketClient.error,
-			bitbucketReady: bitbucketClient.isReady(),
-			bitbucketEnvVars: bitbucketEnvVars,
-			staticEnabledCheck: staticEnabledCheck,
-			staticConfig: typeof staticConfig === 'object' ? {
-				workspace: staticConfig.workspace,
-				username: staticConfig.username,
-				apiToken: staticConfig.apiToken ? '[SET]' : '[NOT SET]',
-				defaultRepo: staticConfig.defaultRepo
-			} : staticConfig
-		};
-		
-		if (!bitbucketClient.isReady()) {
-			log.warn(`[DEBUG] Bitbucket client not ready, skipping context. Enabled: ${bitbucketClient.enabled}, Client: ${!!bitbucketClient.client}, Error: ${bitbucketClient.error}`);
-			ticket.contextDebug = { 
-				...ticket.contextDebug, 
-				step: 'bitbucket_not_ready', 
-				reason: `Bitbucket not ready. Enabled: ${bitbucketClient.enabled}, Client: ${!!bitbucketClient.client}, Error: ${bitbucketClient.error}`
-			};
+		if (!bitbucketClient.enabled) {
+			log.info('Bitbucket client not enabled, skipping context');
 			return;
 		}
-		log.info(`[DEBUG] ✅ Bitbucket client is ready`);
 
 		// Initialize context services
-		log.info(`[DEBUG] Initializing context services...`);
 		const relationshipResolver = new JiraRelationshipResolver(jiraClient);
 		const prMatcher = new PRTicketMatcher(bitbucketClient, jiraClient);
 		const contextAggregator = new ContextAggregator(relationshipResolver, bitbucketClient, prMatcher);
-		log.info(`[DEBUG] ✅ Context services initialized`);
-		ticket.contextDebug = { 
-			...ticket.contextDebug, 
-			step: 'services_initialized',
-			ticketForContext: {
-				jiraKey: ticket.jiraKey,
-				parentKey: ticket.parentKey,
-				issueType: ticket.issueType,
-				hasParentKey: !!ticket.parentKey,
-				ticketKeys: Object.keys(ticket)
+
+		log.info(`Fetching context for ticket ${ticketId}...`);
+
+			// Extract repository information from ticket's development info if available
+	let detectedRepositories = [];
+	
+	// Try to get repository info from development status first
+	if (contextAggregator.prMatcher) {
+		try {
+			const devStatusResult = await contextAggregator.prMatcher.getJiraDevStatus(ticketId);
+			if (devStatusResult.success && devStatusResult.data) {
+				// Extract unique repository names from PRs
+				const repoNames = devStatusResult.data
+					.filter(pr => pr.repository)
+					.map(pr => {
+						// Handle both full paths and repo names
+						const repo = pr.repository;
+						return repo.includes('/') ? repo.split('/')[1] : repo;
+					})
+					.filter((repo, index, arr) => arr.indexOf(repo) === index); // Remove duplicates
+				
+				detectedRepositories = repoNames;
+				log.info(`Detected repositories from development info: ${detectedRepositories.join(', ')}`);
 			}
-		};
+		} catch (devError) {
+			log.warn(`Could not detect repositories from development info: ${devError.message}`);
+		}
+	}
+	
+	// Get context with configurable maxRelated parameter
+	// Use detected repositories for more targeted PR searches
+	const contextPromise = contextAggregator.aggregateContext(ticketId, {
+		depth: 2,
+		maxRelated: maxRelatedTickets,
+		detectedRepositories: detectedRepositories, // Pass detected repos for smarter PR matching
+		log: {
+			info: (msg) => log.info(msg),
+			warn: (msg) => log.warn(msg),
+			error: (msg) => log.error(msg),
+			debug: (msg) => log.debug ? log.debug(msg) : log.info(`[DEBUG] ${msg}`) // Fallback for debug
+		}
+	});
 
-		log.info(`[DEBUG] Fetching context for ticket ${ticketId}...`);
-
-		// Get context with reasonable timeout
-		const contextOptions = {
-			depth: 2,
-			maxRelated: 15, // Limit for performance
-			repoSlug: process.env.BITBUCKET_DEFAULT_REPO,
-			log // Pass the logger to the context aggregator
-		};
-		log.info(`[DEBUG] Context options: ${JSON.stringify(contextOptions)}`);
-		ticket.contextDebug = { ...ticket.contextDebug, step: 'starting_aggregation', contextOptions };
-		
-		const contextPromise = contextAggregator.aggregateContext(ticketId, contextOptions);
-
-		// 5-second timeout for context retrieval
+		// 30-second timeout for context retrieval (matches working test)
 		const timeoutPromise = new Promise((_, reject) =>
-			setTimeout(() => reject(new Error('Context retrieval timeout')), 5000)
+			setTimeout(() => reject(new Error('Context retrieval timeout')), 30000)
 		);
 
-		log.info(`[DEBUG] Starting context aggregation with 5s timeout...`);
 		const context = await Promise.race([contextPromise, timeoutPromise]);
-		log.info(`[DEBUG] Context aggregation completed. Has debugInfo: ${!!context?.debugInfo}`);
-		log.info(`[DEBUG] Context debugInfo: ${JSON.stringify(context?.debugInfo, null, 2)}`);
-		ticket.contextDebug = { 
-			...ticket.contextDebug, 
-			step: 'aggregation_complete', 
-			hasContext: !!context,
-			contextHasDebugInfo: !!context?.debugInfo,
-			contextDebugInfo: context?.debugInfo,
-			contextResult: context // Add the full context result for debugging
-		};
 
 		if (context && context.relatedContext) {
-			log.info(`[DEBUG] Adding context to ticket...`);
-			// Add context directly to the ticket object since it might not be a JiraTicket instance
-			if (typeof ticket.addContext === 'function') {
-				ticket.addContext(context.relatedContext);
-			} else {
-				// Fallback: add context directly to the object
-				ticket.relatedContext = context.relatedContext;
+			// Extract attachment images from context tickets before processing
+			const contextImages = extractAndRemoveContextImages(context.relatedContext, log);
+			
+			// Apply deduplication between subtasks and related context
+			const deduplicatedData = deduplicateTickets(
+				ticket.subtasks,
+				context.relatedContext,
+				log
+			);
+			
+			// Replace the original structure with the unified deduplicated structure
+			ticket.relatedTickets = deduplicatedData.relatedTickets;
+			ticket.relationshipSummary = deduplicatedData.relationshipSummary;
+			ticket.contextSummary = deduplicatedData.contextSummary;
+			
+			// Remove the old separate subtasks field since we now have unified relatedTickets
+			// This eliminates duplication between subtasks and relatedTickets
+			if (ticket.subtasks) {
+				delete ticket.subtasks;
 			}
-			log.info(`[DEBUG] ✅ Added context with ${context.relatedContext.summary.totalRelated} related items`);
-			ticket.contextDebug = { ...ticket.contextDebug, step: 'context_added', totalRelated: context.relatedContext.summary.totalRelated };
+			
+			log.info(`Added unified context with ${deduplicatedData.relationshipSummary.totalUnique} unique related tickets`);
+			
+			// Store context images for later use in the response
+			if (contextImages.length > 0) {
+				ticket._contextImages = contextImages;
+				log.info(`Extracted ${contextImages.length} images from context tickets`);
+			}
 		} else {
-			log.warn(`[DEBUG] No context returned or no relatedContext property`);
-			ticket.contextDebug = { ...ticket.contextDebug, step: 'no_context', context: context };
+			log.info('No context returned or no relatedContext property');
+		}
+		
+		// CRITICAL FIX: Check if main ticket has PR data after context aggregation
+		// The context aggregator only fetches PR data for related tickets, not the source ticket
+		if (!ticket.pullRequests || ticket.pullRequests.length === 0) {
+			log.info(`Main ticket ${ticketId} has no PR data, fetching from development status...`);
+			
+			try {
+				// Get PRs for the main ticket from Jira dev status
+				const mainTicketPRs = await prMatcher.getJiraDevStatus(ticketId);
+				
+				if (mainTicketPRs.success && mainTicketPRs.data && mainTicketPRs.data.length > 0) {
+					// The PRs are already enhanced by getJiraDevStatus
+					ticket.pullRequests = mainTicketPRs.data;
+					log.info(`Added ${mainTicketPRs.data.length} PRs to main ticket ${ticketId}`);
+					
+					// Debug log PR details
+					mainTicketPRs.data.forEach(pr => {
+						log.info(`Main ticket PR ${pr.id}: has diffStat=${!!pr.diffStat}, has filesChanged=${!!pr.filesChanged}`);
+						if (pr.diffStat) {
+							log.info(`  - Additions: ${pr.diffStat.additions}, Deletions: ${pr.diffStat.deletions}`);
+						}
+						if (pr.filesChanged) {
+							log.info(`  - Files changed: ${pr.filesChanged.length}`);
+						}
+					});
+				}
+			} catch (prError) {
+				log.warn(`Failed to fetch PR data for main ticket: ${prError.message}`);
+			}
 		}
 
 	} catch (error) {
-		log.error(`[DEBUG] Context retrieval failed: ${error.message}`);
-		log.error(`[DEBUG] Error stack: ${error.stack}`);
-		ticket.contextDebug = { 
-			...ticket.contextDebug, 
-			step: 'error', 
-			error: error.message, 
-			stack: error.stack 
-		};
+		log.warn(`Context retrieval failed: ${error.message}`);
 		// Don't throw - context failure shouldn't break main functionality
 	}
 }

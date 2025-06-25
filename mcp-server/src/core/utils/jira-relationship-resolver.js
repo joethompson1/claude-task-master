@@ -283,30 +283,46 @@ export class JiraRelationshipResolver {
 	async traverseParentChild(issue, relationships, visited, maxDepth, includeTypes, currentDepth, log) {
 		// Traverse parent relationship
 		if (includeTypes.includes('parent') && issue.parentKey) {
-			if (!visited.has(issue.parentKey) && !this.isRelationshipExists(relationships, issue.parentKey, 'parent')) {
-				const parentResult = await this.jiraClient.fetchIssue(issue.parentKey, { log });
+			let parentResult = null;
+			let shouldTraverse = false;
+			
+			// Check if parent relationship already exists
+			const parentRelationshipExists = this.isRelationshipExists(relationships, issue.parentKey, 'parent');
+			
+			if (!visited.has(issue.parentKey) && !parentRelationshipExists) {
+				// Parent not yet discovered, fetch and add it
+				parentResult = await this.jiraClient.fetchIssue(issue.parentKey, { log });
 				if (parentResult.success) {
 					relationships.push({
 						issueKey: issue.parentKey,
 						relationship: 'parent',
 						direction: 'upward',
 						issue: parentResult.data,
-						depth: currentDepth // Use current depth as passed by caller
+						depth: currentDepth
 					});
-
-					// Recursively traverse parent if within depth limit
-					if (currentDepth < maxDepth) {
-						await this.traverseRelationships(
-							parentResult.data,
-							relationships,
-							visited,
-							maxDepth,
-							includeTypes,
-							currentDepth + 1,
-							log
-						);
-					}
+					shouldTraverse = true;
 				}
+			} else if (!visited.has(issue.parentKey) && parentRelationshipExists) {
+				// Parent relationship exists but hasn't been recursively traversed yet
+				// Find the existing parent in relationships
+				const existingParent = relationships.find(r => r.issueKey === issue.parentKey && r.relationship === 'parent');
+				if (existingParent) {
+					parentResult = { success: true, data: existingParent.issue };
+					shouldTraverse = true;
+				}
+			}
+
+			// Recursively traverse parent if within depth limit and we should traverse
+			if (shouldTraverse && parentResult && parentResult.success && currentDepth < maxDepth) {
+				await this.traverseRelationships(
+					parentResult.data,
+					relationships,
+					visited,
+					maxDepth,
+					includeTypes,
+					currentDepth + 1,
+					log
+				);
 			}
 		}
 
@@ -358,19 +374,103 @@ export class JiraRelationshipResolver {
 	 * @param {Object} log - Logger object
 	 */
 	async traverseEpicRelationships(issue, relationships, visited, maxDepth, includeTypes, currentDepth, log) {
+		log.info(`[EPIC DEBUG] === traverseEpicRelationships called ===`);
+		log.info(`[EPIC DEBUG] Issue: ${issue.jiraKey}, Type: ${issue.issueType}`);
+		log.info(`[EPIC DEBUG] Include Types: ${includeTypes.join(', ')}`);
+		log.info(`[EPIC DEBUG] Current Depth: ${currentDepth}, Max Depth: ${maxDepth}`);
+		log.info(`[EPIC DEBUG] Checking if should find stories: includeTypes.includes('story') = ${includeTypes.includes('story')}`);
+		log.info(`[EPIC DEBUG] Issue type check: issue.issueType === 'Epic' = ${issue.issueType === 'Epic'}`);
+		
 		// If current issue is an Epic, find its stories
+		// Special case: even if this epic was visited for other relationship types (parent, epic),
+		// we still need to traverse its child stories if they haven't been found yet
 		if (includeTypes.includes('story') && issue.issueType === 'Epic') {
-			const storiesJql = `project = "${this.jiraClient.config.project}" AND "Epic Link" = "${issue.jiraKey}"`;
-			const storiesResult = await this.jiraClient.searchIssues(storiesJql, { 
-				maxResults: 50, 
-				log 
-			});
+			log.info(`[EPIC DEBUG] ✅ Found Epic ${issue.jiraKey}, searching for child stories...`);
+			
+			// Extract project from the issue key (e.g., GROOT-21 -> GROOT)
+			const issueProject = issue.jiraKey.split('-')[0];
+			const configProject = this.jiraClient.config.project;
+			
+			log.info(`[EPIC DEBUG] Issue project: ${issueProject}, Config project: ${configProject}`);
+			
+			// Try multiple approaches to find child stories with different project searches
+			const epicSearchQueries = [
+				// Method 1: Try with the issue's own project first
+				`project = "${issueProject}" AND "Epic Link" = "${issue.jiraKey}"`,
+				`project = "${issueProject}" AND parent = "${issue.jiraKey}"`,
+				`project = "${issueProject}" AND Epic Link = "${issue.jiraKey}"`,
+				`project = "${issueProject}" AND cf[10014] = "${issue.jiraKey}"`,
+				// Method 2: Try with configured project (if different)
+				...(issueProject !== configProject ? [
+					`project = "${configProject}" AND "Epic Link" = "${issue.jiraKey}"`,
+					`project = "${configProject}" AND parent = "${issue.jiraKey}"`,
+					`project = "${configProject}" AND Epic Link = "${issue.jiraKey}"`,
+					`project = "${configProject}" AND cf[10014] = "${issue.jiraKey}"`
+				] : []),
+				// Method 3: Try without project constraint (cross-project search)
+				`"Epic Link" = "${issue.jiraKey}"`,
+				`parent = "${issue.jiraKey}"`,
+				`Epic Link = "${issue.jiraKey}"`,
+				`cf[10014] = "${issue.jiraKey}"`
+			];
 
-			if (storiesResult.success) {
-				for (const storyIssue of storiesResult.data) {
-					if (!visited.has(storyIssue.jiraKey) && !this.isRelationshipExists(relationships, storyIssue.jiraKey, 'story')) {
+			log.info(`[EPIC DEBUG] Generated ${epicSearchQueries.length} search queries to try`);
+			let foundStories = [];
+			let successfulQuery = null;
+			
+			for (let i = 0; i < epicSearchQueries.length; i++) {
+				const jql = epicSearchQueries[i];
+				log.info(`[EPIC DEBUG] Query ${i + 1}/${epicSearchQueries.length}: ${jql}`);
+				
+				try {
+					const storiesResult = await this.jiraClient.searchIssues(jql, { 
+						maxResults: 50, 
+						log 
+					});
+
+					log.info(`[EPIC DEBUG] Query result - success: ${storiesResult.success}, data length: ${storiesResult.data ? storiesResult.data.length : 'null/undefined'}`);
+					
+					if (storiesResult.success && storiesResult.data && storiesResult.data.length > 0) {
+						log.info(`[EPIC DEBUG] ✅ Found ${storiesResult.data.length} stories with this query`);
+						log.info(`[EPIC DEBUG] Story keys: ${storiesResult.data.map(s => s.jiraKey || s.key).join(', ')}`);
+						foundStories = storiesResult.data;
+						successfulQuery = jql;
+						break; // Use the first successful query
+					} else {
+						log.info(`[EPIC DEBUG] ❌ No stories found with this query`);
+						if (storiesResult.error) {
+							log.info(`[EPIC DEBUG] Query error: ${JSON.stringify(storiesResult.error)}`);
+						}
+					}
+				} catch (error) {
+					log.warn(`[EPIC DEBUG] Query exception: ${error.message}`);
+					log.warn(`[EPIC DEBUG] Full error: ${JSON.stringify(error, null, 2)}`);
+				}
+			}
+
+			// Process found stories
+			if (foundStories.length > 0) {
+				log.info(`[EPIC DEBUG] 🎯 SUCCESS! Processing ${foundStories.length} child stories for epic ${issue.jiraKey}`);
+				log.info(`[EPIC DEBUG] Successful query was: ${successfulQuery}`);
+				
+				for (let i = 0; i < foundStories.length; i++) {
+					const storyIssue = foundStories[i];
+					const storyKey = storyIssue.jiraKey || storyIssue.key;
+					log.info(`[EPIC DEBUG] Processing story ${i + 1}: ${storyKey}`);
+					
+					const isVisited = visited.has(storyKey);
+					const relationshipExists = this.isRelationshipExists(relationships, storyKey, 'story');
+					
+					log.info(`[EPIC DEBUG] Story ${storyKey} checks:`);
+					log.info(`[EPIC DEBUG]   - Already visited: ${isVisited}`);
+					log.info(`[EPIC DEBUG]   - Relationship exists: ${relationshipExists}`);
+					log.info(`[EPIC DEBUG]   - Should add: ${!isVisited && !relationshipExists}`);
+					
+					if (!isVisited && !relationshipExists) {
+						log.info(`[EPIC DEBUG] ✅ Adding story ${storyKey} as child of epic ${issue.jiraKey}`);
+						
 						relationships.push({
-							issueKey: storyIssue.jiraKey,
+							issueKey: storyKey,
 							relationship: 'story',
 							direction: 'downward',
 							issue: storyIssue,
@@ -379,8 +479,96 @@ export class JiraRelationshipResolver {
 
 						// Recursively traverse stories if within depth limit
 						if (currentDepth < maxDepth) {
+							log.info(`[EPIC DEBUG] Recursively traversing story ${storyKey} (depth ${currentDepth} < ${maxDepth})`);
 							await this.traverseRelationships(
 								storyIssue,
+								relationships,
+								visited,
+								maxDepth,
+								includeTypes,
+								currentDepth + 1,
+								log
+							);
+						} else {
+							log.info(`[EPIC DEBUG] Not recursing into story ${storyKey} - reached max depth`);
+						}
+					} else {
+						log.info(`[EPIC DEBUG] ⚠️ Skipping story ${storyKey} - already visited or relationship exists`);
+					}
+				}
+			} else {
+				log.warn(`[EPIC DEBUG] ❌ EPIC TRAVERSAL FAILED! No child stories found for epic ${issue.jiraKey} with any query method`);
+				log.warn(`[EPIC DEBUG] This could indicate:`);
+				log.warn(`[EPIC DEBUG] 1. The epic link field name is different`);
+				log.warn(`[EPIC DEBUG] 2. Project access restrictions`);
+				log.warn(`[EPIC DEBUG] 3. Stories are in a different project`);
+				log.warn(`[EPIC DEBUG] 4. Different field configuration in this Jira instance`);
+			}
+		} else {
+			log.info(`[EPIC DEBUG] ⚠️ Skipping epic story search:`);
+			log.info(`[EPIC DEBUG] - Include story: ${includeTypes.includes('story')}`);
+			log.info(`[EPIC DEBUG] - Is Epic: ${issue.issueType === 'Epic'}`);
+		}
+
+		// If current issue has an Epic Link, find the epic
+		if (includeTypes.includes('epic')) {
+			// Try multiple methods to find the epic relationship
+			try {
+				// Method 1: Try to get epic from parent field first (modern Jira)
+				if (issue.parentKey && !visited.has(issue.parentKey) && !this.isRelationshipExists(relationships, issue.parentKey, 'epic')) {
+					const epicResult = await this.jiraClient.fetchIssue(issue.parentKey, { log });
+					if (epicResult.success && epicResult.data.issueType === 'Epic') {
+						log.info(`[EPIC DEBUG] Found epic via parent field: ${issue.parentKey}`);
+						
+						relationships.push({
+							issueKey: issue.parentKey,
+							relationship: 'epic',
+							direction: 'upward',
+							issue: epicResult.data,
+							depth: currentDepth
+						});
+
+						// Recursively traverse epic if within depth limit
+						if (currentDepth < maxDepth) {
+							await this.traverseRelationships(
+								epicResult.data,
+								relationships,
+								visited,
+								maxDepth,
+								includeTypes,
+								currentDepth + 1,
+								log
+							);
+						}
+						return; // Found via parent, no need to check custom fields
+					}
+				}
+				
+				// Method 2: Query for epic link via custom fields
+				const rawIssue = await this.jiraClient.getClient().get(`/rest/api/3/issue/${issue.jiraKey}`, {
+					params: {
+						fields: 'customfield_10014,parent,summary,status,priority,issuetype' // Epic Link is typically customfield_10014
+					}
+				});
+
+				const epicLink = rawIssue.data?.fields?.customfield_10014;
+				if (epicLink && !visited.has(epicLink) && !this.isRelationshipExists(relationships, epicLink, 'epic')) {
+					log.info(`[EPIC DEBUG] Found epic via custom field: ${epicLink}`);
+					
+					const epicResult = await this.jiraClient.fetchIssue(epicLink, { log });
+					if (epicResult.success) {
+						relationships.push({
+							issueKey: epicLink,
+							relationship: 'epic',
+							direction: 'upward',
+							issue: epicResult.data,
+							depth: currentDepth
+						});
+
+						// Recursively traverse epic if within depth limit
+						if (currentDepth < maxDepth) {
+							await this.traverseRelationships(
+								epicResult.data,
 								relationships,
 								visited,
 								maxDepth,
@@ -391,43 +579,8 @@ export class JiraRelationshipResolver {
 						}
 					}
 				}
-			}
-		}
-
-		// If current issue has an Epic Link, find the epic
-		if (includeTypes.includes('epic')) {
-			// Query for epic link - this requires accessing the raw Jira fields
-			const rawIssue = await this.jiraClient.getClient().get(`/rest/api/3/issue/${issue.jiraKey}`, {
-				params: {
-					fields: 'customfield_10014,summary,status,priority,issuetype' // Epic Link is typically customfield_10014
-				}
-			});
-
-			const epicLink = rawIssue.data?.fields?.customfield_10014;
-			if (epicLink && !visited.has(epicLink) && !this.isRelationshipExists(relationships, epicLink, 'epic')) {
-				const epicResult = await this.jiraClient.fetchIssue(epicLink, { log });
-				if (epicResult.success) {
-					relationships.push({
-						issueKey: epicLink,
-						relationship: 'epic',
-						direction: 'upward',
-						issue: epicResult.data,
-						depth: currentDepth // Use current depth as passed by caller
-					});
-
-					// Recursively traverse epic if within depth limit
-					if (currentDepth < maxDepth) {
-						await this.traverseRelationships(
-							epicResult.data,
-							relationships,
-							visited,
-							maxDepth,
-							includeTypes,
-							currentDepth + 1,
-							log
-						);
-					}
-				}
+			} catch (error) {
+				log.warn(`[EPIC DEBUG] Error finding epic relationship: ${error.message}`);
 			}
 		}
 	}

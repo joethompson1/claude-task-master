@@ -40,7 +40,7 @@ export class BitbucketClient {
 			workspace: process.env.BITBUCKET_WORKSPACE,
 			username: process.env.BITBUCKET_USERNAME,
 			apiToken: process.env.BITBUCKET_API_TOKEN,
-			defaultRepo: process.env.BITBUCKET_DEFAULT_REPO
+			      // defaultRepo removed - system will search across all repositories
 		};
 	}
 
@@ -71,13 +71,13 @@ export class BitbucketClient {
 			);
 		}
 
+		// Create Basic Auth header manually - axios auth object doesn't work properly with Bitbucket API tokens
+		const basicAuth = Buffer.from(`${username}:${apiToken}`).toString('base64');
+
 		return axios.create({
 			baseURL: 'https://api.bitbucket.org/2.0',
-			auth: {
-				username: username,
-				password: apiToken
-			},
 			headers: {
+				'Authorization': `Basic ${basicAuth}`,
 				'Content-Type': 'application/json',
 				Accept: 'application/json'
 			},

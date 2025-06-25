@@ -179,6 +179,41 @@ export class JiraTicket {
 	}
 
 	/**
+	 * Format context for MCP tool responses
+	 * @returns {Object|null} - Formatted context or null if no context
+	 */
+	getFormattedContext() {
+		if (!this.relatedContext) {
+			return null;
+		}
+
+		return {
+			summary: this.relatedContext.summary,
+			relatedTickets: this.relatedContext.tickets.map(item => ({
+				key: item.ticket.key,
+				title: item.ticket.title,
+				status: item.ticket.status,
+				relationship: item.relationship,
+				relevanceScore: item.relevanceScore,
+				pullRequestCount: item.pullRequests?.length || 0,
+				hasImplementation: item.pullRequests?.some(pr => pr.status === 'MERGED') || false
+			})),
+			implementationDetails: this.relatedContext.tickets
+				.filter(item => item.pullRequests?.length > 0)
+				.map(item => ({
+					ticketKey: item.ticket.key,
+					pullRequests: item.pullRequests.map(pr => ({
+						title: pr.title,
+						status: pr.status,
+						url: pr.url,
+						filesChanged: pr.filesChanged,
+						mergedDate: pr.mergedDate
+					}))
+				}))
+		};
+	}
+
+	/**
 	 * Normalize markdown content to ensure consistent formatting
 	 * @param {string} text - Raw markdown text
 	 * @returns {string} - Normalized markdown text
@@ -657,7 +692,7 @@ export class JiraTicket {
 	 * @returns {Object} - Task object in Task Master format
 	 */
 	toTaskMasterFormat() {
-		return {
+		const result = {
 			id: this.jiraKey || '',
 			title: this.title,
 			description: this.description,
@@ -669,8 +704,16 @@ export class JiraTicket {
 			dependencies: this.dependencies,
 			jiraKey: this.jiraKey,
 			parentKey: this.parentKey,
-			attachments: this.attachments
+			attachments: this.attachments,
+			issueType: this.issueType
 		};
+
+		// Add context if available
+		if (this.relatedContext) {
+			result.relatedContext = this.relatedContext;
+		}
+
+		return result;
 	}
 
 	/**

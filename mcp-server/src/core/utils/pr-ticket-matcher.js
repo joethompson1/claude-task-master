@@ -66,10 +66,10 @@ export class PRTicketMatcher {
    * @param {number} [options.maxResults] - Maximum number of PRs to analyze (default: 100)
    * @returns {Promise<Object>} Result with PR matches and confidence scores
    */
-  async findPRsForTicket(ticketKey, repoSlug, options = {}) {
+  async findPRsForTicket(ticketKey, repoSlug = null, options = {}) {
     try {
       const { states = ['OPEN', 'MERGED'], maxResults = 100 } = options;
-      const cacheKey = `pr-ticket:${ticketKey}:${repoSlug}:${states.join(',')}`;
+      const cacheKey = `pr-ticket:${ticketKey}:${repoSlug || 'all-repos'}:${states.join(',')}`;
       
       // Check cache first
       const cached = this.getFromCache(cacheKey);
@@ -77,49 +77,87 @@ export class PRTicketMatcher {
         return { success: true, data: cached, fromCache: true };
       }
 
+      // Try Jira dev-status API first if no specific repository is provided
+      // Note: This API may not be available on all Jira instances
+      let devStatusFound = false;
+      if (!repoSlug) {
+        try {
+          const devStatusResult = await this.getJiraDevStatus(ticketKey);
+          if (devStatusResult.success && devStatusResult.data.length > 0) {
+            // Enhance dev-status PRs with Bitbucket diffstat data
+            const enhancedDevStatusPRs = [];
+            
+            if (this.bitbucketClient && this.bitbucketClient.isReady()) {
+              for (const pr of devStatusResult.data) {
+                try {
+                  const repoName = pr.repository || repoSlug;
+                  const enhancedPR = await this.enhancePRWithBitbucketData(pr, repoName);
+                  enhancedDevStatusPRs.push(enhancedPR);
+                } catch (enhanceError) {
+                  // If enhancement fails, use the original PR
+                  enhancedDevStatusPRs.push(pr);
+                }
+              }
+            } else {
+              // No Bitbucket client available, use original PRs
+              enhancedDevStatusPRs.push(...devStatusResult.data);
+            }
+            
+            const result = {
+              ticketKey,
+              pullRequests: enhancedDevStatusPRs
+            };
+            this.setCache(cacheKey, result);
+            return { success: true, data: result, fromCache: false };
+          }
+          devStatusFound = true; // API exists but found no PRs
+        } catch (devStatusError) {
+          // Dev-status API not available, will continue with Bitbucket search
+        }
+      }
+
       // Fetch remote links from Jira first (highest confidence)
       const remoteLinksResult = await this.checkJiraRemoteLinks(ticketKey);
       const officialPRs = remoteLinksResult.success ? remoteLinksResult.data : [];
+      const developmentInfo = remoteLinksResult.developmentInfo;
 
-      // Fetch PRs from Bitbucket
-      const prResults = [];
-      let page = 1;
-      let totalFetched = 0;
-
-      while (totalFetched < maxResults) {
-        const pageSize = Math.min(50, maxResults - totalFetched);
+      // If we have development info indicating PRs exist, use targeted search
+      const hasPRsFromJira = developmentInfo?.hasPRs || officialPRs.length > 0;
+      
+      let prResults = [];
+      
+      if (hasPRsFromJira) {
+        // Development info indicates PRs exist, using targeted search
         
-        for (const state of states) {
-          const prResponse = await this.bitbucketClient.fetchPullRequests(repoSlug, {
-            state,
-            page,
-            pagelen: pageSize
-          });
-
-          if (!prResponse.success) {
-            // If Bitbucket fails, return official links only
+        // Use targeted search when we know PRs exist
+        const targetedResults = await this.searchPRsByTicketKey(ticketKey, repoSlug, states);
+        if (targetedResults.success) {
+          prResults = targetedResults.data;
+        } else {
+          // Fall back to limited search if targeted search fails
+          // Targeted search failed, falling back to limited search
+          const fallbackResults = await this.fetchLimitedPRs(repoSlug, states, 50);
+          if (fallbackResults.success) {
+            prResults = fallbackResults.data;
+          } else {
+            // If everything fails, return official links only
             if (officialPRs.length > 0) {
               const result = { ticketKey, pullRequests: officialPRs };
               this.setCache(cacheKey, result);
               return { success: true, data: result, fromCache: false };
             }
-            return prResponse;
-          }
-
-          prResults.push(...prResponse.data.pullRequests);
-          totalFetched += prResponse.data.pullRequests.length;
-
-          // Stop if no more pages
-          if (!prResponse.data.pagination.next) {
-            break;
+            return fallbackResults;
           }
         }
-
-        page++;
+      } else {
+        // No PR development info found, doing limited search
         
-        // Stop if we've fetched enough or no more results
-        if (totalFetched >= maxResults) {
-          break;
+        // Do limited search when no PRs are expected
+        const limitedResults = await this.fetchLimitedPRs(repoSlug, states, 50);
+        if (limitedResults.success) {
+          prResults = limitedResults.data;
+        } else {
+          return limitedResults;
         }
       }
 
@@ -151,9 +189,40 @@ export class PRTicketMatcher {
       // Sort by confidence score (highest first)
       allMatches.sort((a, b) => b.confidence - a.confidence);
 
+      // Enhance all PRs with diffstat data if Bitbucket client is available
+      const enhancedMatches = [];
+      
+      if (this.bitbucketClient && this.bitbucketClient.isReady()) {
+        for (const match of allMatches) {
+          try {
+            // Extract repo name from the PR or use the provided repoSlug
+            const repoName = match.repository || repoSlug;
+            console.log(`🔍 DEBUG: Enhancing PR ${match.id} with repo ${repoName}`);
+            console.log(`   Original has diffStat: ${!!match.diffStat}`);
+            console.log(`   Original has filesChanged: ${!!match.filesChanged}`);
+            
+            const enhancedPR = await this.enhancePRWithBitbucketData(match, repoName);
+            
+            console.log(`   Enhanced has diffStat: ${!!enhancedPR.diffStat}`);
+            console.log(`   Enhanced has filesChanged: ${!!enhancedPR.filesChanged}`);
+            console.log(`   Enhanced filesChanged length: ${enhancedPR.filesChanged?.length || 0}`);
+            
+            enhancedMatches.push(enhancedPR);
+          } catch (enhanceError) {
+            console.log(`   Enhancement failed: ${enhanceError.message}`);
+            // If enhancement fails, use the original match
+            enhancedMatches.push(match);
+          }
+        }
+      } else {
+        console.log('🔍 DEBUG: Bitbucket client not ready, skipping enhancement');
+        // No Bitbucket client available, use original matches
+        enhancedMatches.push(...allMatches);
+      }
+
       const result = {
         ticketKey,
-        pullRequests: allMatches
+        pullRequests: enhancedMatches
       };
 
       this.setCache(cacheKey, result);
@@ -645,52 +714,376 @@ export class PRTicketMatcher {
   }
 
   /**
-   * Check Jira remote links for official Bitbucket-Jira connections
+   * Check Jira remote links and development custom field for official Bitbucket-Jira connections
    * @param {string} ticketKey - Jira ticket key
-   * @returns {Promise<Object>} Result with official PR links
+   * @returns {Promise<Object>} Result with official PR links and development info
    */
   async checkJiraRemoteLinks(ticketKey) {
+    const bitbucketPRs = [];
+    let developmentInfo = { hasPRs: false, prCount: 0, hasCommits: false, commitCount: 0 };
+    
     try {
-      // Use the Jira client to fetch remote links
+      // First, check traditional remote links
       const remoteLinksResult = await this.jiraClient.fetchRemoteLinks(ticketKey);
       
-      if (!remoteLinksResult.success) {
-        return { success: true, data: [] }; // Not an error, just no links
-      }
+      if (remoteLinksResult.success) {
+        const remoteLinks = remoteLinksResult.data || [];
 
-      const remoteLinks = remoteLinksResult.data || [];
-      const bitbucketPRs = [];
-
-      for (const link of remoteLinks) {
-        const url = link.object?.url || '';
-        
-        // Check if this is a Bitbucket PR URL
-        const prMatch = url.match(/bitbucket\.org\/([^\/]+)\/([^\/]+)\/pull-requests\/(\d+)/);
-        if (prMatch) {
-          const [, workspace, repo, prId] = prMatch;
+        for (const link of remoteLinks) {
+          const url = link.object?.url || '';
           
-          bitbucketPRs.push({
-            id: parseInt(prId, 10),
-            title: link.object?.title || `PR #${prId}`,
-            status: 'UNKNOWN', // We'd need to fetch from Bitbucket to get status
-            url: url,
-            branch: 'unknown',
-            commits: 0,
-            filesChanged: 0,
-            createdDate: null,
-            updatedDate: null,
-            author: null,
-            confidence: CONFIDENCE_THRESHOLDS.OFFICIAL_LINK,
-            matchSources: ['jira-link']
-          });
+          // Check if this is a Bitbucket PR URL
+          const prMatch = url.match(/bitbucket\.org\/([^\/]+)\/([^\/]+)\/pull-requests\/(\d+)/);
+          if (prMatch) {
+            const [, workspace, repo, prId] = prMatch;
+            
+            bitbucketPRs.push({
+              id: parseInt(prId, 10),
+              title: link.object?.title || `PR #${prId}`,
+              status: 'UNKNOWN', // We'd need to fetch from Bitbucket to get status
+              url: url,
+              branch: 'unknown',
+              commits: 0,
+              filesChanged: 0,
+              createdDate: null,
+              updatedDate: null,
+              author: null,
+              confidence: CONFIDENCE_THRESHOLDS.OFFICIAL_LINK,
+              matchSources: ['jira-link']
+            });
+          }
         }
       }
+    } catch (remoteLinksError) {
+      // Remote links failed, continue with development field
+    }
+    
+    try {
+      // Second, check development custom field (customfield_10000)
+      const client = this.jiraClient.getClient();
+      const rawResponse = await client.get(`/rest/api/3/issue/${ticketKey}`);
+      const rawIssue = rawResponse.data;
+      
+      if (rawIssue.fields.customfield_10000) {
+        const devFieldStr = rawIssue.fields.customfield_10000;
+        
+        // Parse the development field JSON
+        const jsonStart = devFieldStr.indexOf('json=') + 5;
+        if (jsonStart > 4) {
+          const jsonPart = devFieldStr.substring(jsonStart);
+          
+          // Find the end of the JSON object by counting braces
+          let braceCount = 0;
+          let jsonEnd = 0;
+          for (let i = 0; i < jsonPart.length; i++) {
+            if (jsonPart[i] === '{') braceCount++;
+            if (jsonPart[i] === '}') braceCount--;
+            if (braceCount === 0 && jsonPart[i] === '}') {
+              jsonEnd = i + 1;
+              break;
+            }
+          }
+          
+          if (jsonEnd > 0) {
+            const jsonStr = jsonPart.substring(0, jsonEnd);
+            const parsedDevInfo = JSON.parse(jsonStr);
+            
+            if (parsedDevInfo.cachedValue?.summary?.pullrequest) {
+              const prSummary = parsedDevInfo.cachedValue.summary.pullrequest;
+              
+              // Update development info with PR information
+              developmentInfo = {
+                hasPRs: prSummary.overall?.count > 0,
+                prCount: prSummary.overall?.count || 0,
+                prState: prSummary.overall?.state,
+                lastUpdated: prSummary.overall?.lastUpdated,
+                sources: Object.keys(prSummary.byInstanceType || {})
+              };
+            }
+          }
+        }
+      }
+    } catch (devError) {
+      // Development field parsing failed, continue with remote links only
+    }
 
-      return { success: true, data: bitbucketPRs };
+    return { success: true, data: bitbucketPRs, developmentInfo };
+  }
+
+  /**
+   * Get PR and commit information from Jira's official dev-status API
+   * @param {string} ticketKey - Jira ticket key
+   * @returns {Promise<Object>} Result with PR data from dev-status API
+   */
+  async getJiraDevStatus(ticketKey) {
+    try {
+      const client = this.jiraClient.getClient();
+      
+      // First get the issue ID
+      const issueResponse = await client.get(`/rest/api/3/issue/${ticketKey}`);
+      const issueId = issueResponse.data.id;
+
+      const prMatches = [];
+      let developmentInfo = { hasPRs: false, prCount: 0, hasCommits: false, commitCount: 0 };
+
+      // Try to get pull request details
+      try {
+        const prResponse = await client.get(`/rest/dev-status/latest/issue/detail?issueId=${issueId}&applicationType=bitbucket&dataType=pullrequest`);
+        
+        if (prResponse.data && prResponse.data.detail && prResponse.data.detail.length > 0) {
+          for (const detail of prResponse.data.detail) {
+            if (detail.pullRequests && detail.pullRequests.length > 0) {
+              developmentInfo.hasPRs = true;
+              developmentInfo.prCount += detail.pullRequests.length;
+
+              for (const pr of detail.pullRequests) {
+                const prMatch = {
+                  id: pr.id,
+                  title: pr.name,
+                  url: pr.url,
+                  state: pr.status,
+                  author: pr.author?.name,
+                  sourceBranch: pr.source?.branch,
+                  destinationBranch: pr.destination?.branch,
+                  repository: pr.repositoryName,
+                  repositoryUrl: pr.repositoryUrl,
+                  created: pr.created,
+                  updated: pr.lastUpdate,
+                  commentCount: pr.commentCount,
+                  reviewers: pr.reviewers || [],
+                  confidence: CONFIDENCE_THRESHOLDS.OFFICIAL_LINK,
+                  source: 'jira_dev_status_api'
+                };
+                
+                // Enhance with detailed Bitbucket data if available
+                if (this.bitbucketClient && this.bitbucketClient.isReady()) {
+                  try {
+                    const enhancedPR = await this.enhancePRWithBitbucketData(prMatch, pr.repositoryName);
+                    prMatches.push(enhancedPR);
+                  } catch (enhanceError) {
+                    // If enhancement fails, use the basic PR data
+                    prMatches.push(prMatch);
+                  }
+                } else {
+                  prMatches.push(prMatch);
+                }
+              }
+            }
+          }
+        }
+      } catch (prError) {
+        // Dev-status PR API failed, continue without official links
+      }
+
+      // Try to get repository/commit details
+      try {
+        const repoResponse = await client.get(`/rest/dev-status/latest/issue/detail?issueId=${issueId}&applicationType=bitbucket&dataType=repository`);
+        
+        if (repoResponse.data && repoResponse.data.detail && repoResponse.data.detail.length > 0) {
+          for (const detail of repoResponse.data.detail) {
+            if (detail.repositories && detail.repositories.length > 0) {
+              for (const repo of detail.repositories) {
+                if (repo.commits && repo.commits.length > 0) {
+                  developmentInfo.hasCommits = true;
+                  developmentInfo.commitCount += repo.commits.length;
+                  
+                  // Add commit information to existing PR matches
+                  for (const commit of repo.commits) {
+                    // Try to find if this commit belongs to any existing PR
+                    const relatedPR = prMatches.find(pr => 
+                      pr.repository === repo.name ||
+                      commit.message?.includes(ticketKey)
+                    );
+                    
+                    const commitInfo = {
+                      id: commit.id,
+                      displayId: commit.displayId,
+                      message: commit.message,
+                      author: commit.author?.name,
+                      date: commit.authorTimestamp,
+                      url: commit.url,
+                      repository: repo.name,
+                      fileCount: commit.fileCount,
+                      merge: commit.merge
+                    };
+                    
+                    if (relatedPR) {
+                      if (!relatedPR.commits) {
+                        relatedPR.commits = [];
+                      }
+                      relatedPR.commits.push(commitInfo);
+                    } else {
+                      // Create a new entry for commits without associated PRs
+                      prMatches.push({
+                        id: `commit-${commit.displayId}`,
+                        title: `Commit: ${commit.message.split('\n')[0]}`,
+                        state: 'COMMITTED',
+                        author: commit.author?.name,
+                        repository: repo.name,
+                        url: commit.url,
+                        created: commit.authorTimestamp,
+                        updated: commit.authorTimestamp,
+                        commits: [commitInfo],
+                        confidence: CONFIDENCE_THRESHOLDS.COMMIT_MESSAGE,
+                        source: 'jira_dev_status_api_commit'
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (repoError) {
+        // Dev-status repository API failed, continue without repository info
+      }
+
+      // Try to get branch details
+      try {
+        const branchResponse = await client.get(`/rest/dev-status/latest/issue/detail?issueId=${issueId}&applicationType=bitbucket&dataType=branch`);
+        
+        if (branchResponse.data && branchResponse.data.detail && branchResponse.data.detail.length > 0) {
+          for (const detail of branchResponse.data.detail) {
+            if (detail.branches && detail.branches.length > 0) {
+              for (const branch of detail.branches) {
+                // Add branch information to existing PR matches
+                const relatedPR = prMatches.find(pr => 
+                  pr.sourceBranch === branch.name ||
+                  pr.repository === branch.repository?.name
+                );
+                
+                if (relatedPR) {
+                  relatedPR.branchInfo = {
+                    name: branch.name,
+                    repository: branch.repository?.name,
+                    url: branch.url,
+                    lastCommit: branch.lastCommit
+                  };
+                } else {
+                  // Add branch as standalone info if no PR found
+                  prMatches.push({
+                    id: `branch-${branch.name}`,
+                    title: `Branch: ${branch.name}`,
+                    state: 'BRANCH',
+                    repository: branch.repository?.name,
+                    url: branch.url,
+                    branchInfo: {
+                      name: branch.name,
+                      repository: branch.repository?.name,
+                      url: branch.url,
+                      lastCommit: branch.lastCommit
+                    },
+                    confidence: CONFIDENCE_THRESHOLDS.BRANCH_NAME,
+                    source: 'jira_dev_status_api_branch'
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch (branchError) {
+        // Dev-status branch API failed, continue without branch info
+      }
+
+      return {
+        success: true,
+        data: prMatches,
+        developmentInfo
+      };
 
     } catch (error) {
-      // If remote links fetching fails, continue without official links
-      return { success: true, data: [] };
+      // If dev-status API is not available (404), return empty result instead of error
+      if (error.response?.status === 404) {
+        return {
+          success: true,
+          data: [],
+          developmentInfo: { hasPRs: false, prCount: 0, hasCommits: false, commitCount: 0 }
+        };
+      }
+      
+      return {
+        success: false,
+        error: {
+          code: 'JIRA_DEV_STATUS_ERROR',
+          message: `Failed to get dev-status for ${ticketKey}: ${error.message}`
+        }
+      };
+    }
+  }
+
+  /**
+   * Detect repository from Jira ticket development information
+   * @param {string} ticketKey - Jira ticket key
+   * @returns {Promise<string|null>} Repository slug or null if not found
+   */
+  async detectRepositoryFromTicket(ticketKey) {
+    try {
+      const client = this.jiraClient.getClient();
+      const issueResponse = await client.get(`/rest/api/3/issue/${ticketKey}`);
+      const issue = issueResponse.data;
+      
+      // Check remote links for Bitbucket repository URLs
+      const remoteLinksResult = await this.jiraClient.fetchRemoteLinks(ticketKey);
+      if (remoteLinksResult.success) {
+        const remoteLinks = remoteLinksResult.data || [];
+        for (const link of remoteLinks) {
+          const url = link.object?.url || '';
+          // Extract repository from Bitbucket URLs
+          const repoMatch = url.match(/bitbucket\.org\/([^\/]+)\/([^\/]+)/);
+          if (repoMatch) {
+            return repoMatch[2]; // Return repository name (slug)
+          }
+        }
+      }
+      
+      // Check development custom field for repository information
+      if (issue.fields.customfield_10000) {
+        const devFieldStr = issue.fields.customfield_10000;
+        
+        // Parse the development field JSON
+        const jsonStart = devFieldStr.indexOf('json=') + 5;
+        if (jsonStart > 4) {
+          const jsonPart = devFieldStr.substring(jsonStart);
+          
+          // Find the end of the JSON object by counting braces
+          let braceCount = 0;
+          let jsonEnd = 0;
+          for (let i = 0; i < jsonPart.length; i++) {
+            if (jsonPart[i] === '{') braceCount++;
+            if (jsonPart[i] === '}') braceCount--;
+            if (braceCount === 0 && jsonPart[i] === '}') {
+              jsonEnd = i + 1;
+              break;
+            }
+          }
+          
+          const jsonStr = jsonPart.substring(0, jsonEnd);
+          const developmentInfo = JSON.parse(jsonStr);
+          
+          // Look for repository information in the development data
+          if (developmentInfo.cachedValue?.summary?.repository) {
+            const repositories = developmentInfo.cachedValue.summary.repository;
+            if (repositories.overall?.count > 0 && repositories.byInstanceType) {
+              // Get the first repository from the development info
+              const instanceTypes = Object.keys(repositories.byInstanceType);
+              for (const instanceType of instanceTypes) {
+                const repos = repositories.byInstanceType[instanceType];
+                if (repos && repos.length > 0) {
+                  // Extract repository name from the first repository
+                  const repoName = repos[0].name || repos[0].displayName;
+                  if (repoName) {
+                    return repoName;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      return null;
     }
   }
 
@@ -715,5 +1108,321 @@ export class PRTicketMatcher {
 
   clearCache() {
     this.cache.clear();
+  }
+
+  /**
+   * Enhance a PR object with detailed data from Bitbucket API
+   * @param {Object} prMatch - Basic PR object from Jira dev-status
+   * @param {string} repositoryName - Repository name
+   * @returns {Promise<Object>} Enhanced PR object with description, files, and diffstat
+   */
+  async enhancePRWithBitbucketData(prMatch, repositoryName) {
+    try {
+      // Extract repository name from full name if needed
+      const repoName = repositoryName && repositoryName.includes('/') 
+        ? repositoryName.split('/')[1] 
+        : repositoryName || 'unknown';
+      
+      // Skip enhancement if we don't have a valid repo name or PR ID
+      if (!repoName || repoName === 'unknown' || !prMatch.id) {
+        return prMatch;
+      }
+
+      // Fetch detailed PR data from Bitbucket
+      const client = this.bitbucketClient.getClient();
+      const workspace = this.bitbucketClient.config.workspace;
+      
+      const prDetailResponse = await client.get(
+        `/repositories/${workspace}/${repoName}/pullrequests/${prMatch.id}`
+      );
+      
+      if (prDetailResponse.data) {
+        const prDetail = prDetailResponse.data;
+        
+        // Create enhanced PR object with all the detailed data
+        const enhancedPR = {
+          ...prMatch,
+          description: prDetail.description || '',
+          state: prDetail.state || prMatch.state,
+          created: prDetail.created_on || prMatch.created,
+          updated: prDetail.updated_on || prMatch.updated,
+          mergeCommit: prDetail.merge_commit?.hash,
+          commentCount: prDetail.comment_count || 0,
+          taskCount: prDetail.task_count || 0,
+          commits: prMatch.commits || [], // Preserve existing commits if they exist
+          filesChanged: [],
+          diffStat: {
+            totalFiles: 0,
+            linesAdded: 0,
+            linesRemoved: 0
+          }
+        };
+
+        // Fetch commits for this PR - but preserve existing commits if they exist
+        if (!enhancedPR.commits || enhancedPR.commits.length === 0) {
+          try {
+            const commitsResponse = await client.get(
+              `/repositories/${workspace}/${repoName}/pullrequests/${prMatch.id}/commits`
+            );
+            
+            if (commitsResponse.data && commitsResponse.data.values) {
+              enhancedPR.commits = commitsResponse.data.values.map(commit => ({
+                hash: commit.hash,
+                shortHash: commit.hash.substring(0, 8),
+                message: commit.message,
+                author: commit.author.user?.display_name || commit.author.raw,
+                date: commit.date,
+                url: commit.links?.html?.href,
+                // Add fileCount - will be populated later if diffstat is available
+                fileCount: 0
+              }));
+            }
+          } catch (commitsError) {
+            // Could not fetch commits for this PR, continuing without commit data
+          }
+        } else {
+          // Preserve existing commits but ensure they have fileCount field
+          enhancedPR.commits = enhancedPR.commits.map(commit => ({
+            ...commit,
+            fileCount: commit.fileCount || 0
+          }));
+        }
+
+        // Fetch diffstat for this PR - try different approaches
+        try {
+          // First try the direct diffstat endpoint
+          let diffstatResponse;
+          try {
+            diffstatResponse = await client.get(
+              `/repositories/${workspace}/${repoName}/pullrequests/${prMatch.id}/diffstat`
+            );
+          } catch (diffstatError) {
+            // If direct diffstat fails, try the diff endpoint and parse it
+            // Direct diffstat failed, trying diff endpoint
+            try {
+              const diffResponse = await client.get(
+                `/repositories/${workspace}/${repoName}/pullrequests/${prMatch.id}/diff`
+              );
+              
+              if (diffResponse.data && typeof diffResponse.data === 'string') {
+                // Parse the diff text to extract file information
+                const diffText = diffResponse.data;
+                const lines = diffText.split('\n');
+                const fileHeaders = lines.filter(line => line.startsWith('diff --git'));
+                const addedLines = lines.filter(line => line.startsWith('+')).length;
+                const removedLines = lines.filter(line => line.startsWith('-')).length;
+                
+                enhancedPR.filesChanged = fileHeaders.map(header => {
+                  const pathMatch = header.match(/diff --git a\/(.+) b\/(.+)/);
+                  return {
+                    path: pathMatch ? pathMatch[2] : 'unknown',
+                    status: 'modified',
+                    linesAdded: 0, // Can't determine per-file from unified diff easily
+                    linesRemoved: 0,
+                    type: 'file'
+                  };
+                });
+                
+                enhancedPR.diffStat = {
+                  totalFiles: fileHeaders.length,
+                  linesAdded: addedLines,
+                  linesRemoved: removedLines
+                };
+                
+                // Update commit fileCount if we have commits and diffstat
+                if (enhancedPR.commits && enhancedPR.commits.length > 0 && fileHeaders.length > 0) {
+                  const latestCommit = enhancedPR.commits[enhancedPR.commits.length - 1];
+                  if (latestCommit) {
+                    latestCommit.fileCount = fileHeaders.length;
+                  }
+                  
+                  // Also update any commits that have fileCount: 0 from Jira dev-status
+                  enhancedPR.commits.forEach(commit => {
+                    if (commit.fileCount === 0 || commit.fileCount === undefined) {
+                      // Don't override merge commits or commits that already have a file count
+                      if (!commit.merge) {
+                        commit.fileCount = fileHeaders.length;
+                      }
+                    }
+                  });
+                }
+              }
+            } catch (diffError) {
+              // Both diffstat and diff endpoints failed
+            }
+          }
+          
+          // If we got diffstat data, process it
+          if (diffstatResponse && diffstatResponse.data && diffstatResponse.data.values) {
+            const diffstat = diffstatResponse.data.values;
+            enhancedPR.filesChanged = diffstat.map(file => ({
+              path: file.new?.path || file.old?.path || 'unknown',
+              status: file.status,
+              linesAdded: file.lines_added || 0,
+              linesRemoved: file.lines_removed || 0,
+              type: file.new?.type || file.old?.type || 'unknown'
+            }));
+            
+            // Calculate totals
+            enhancedPR.diffStat = {
+              totalFiles: diffstat.length,
+              linesAdded: diffstat.reduce((sum, file) => sum + (file.lines_added || 0), 0),
+              linesRemoved: diffstat.reduce((sum, file) => sum + (file.lines_removed || 0), 0)
+            };
+            
+            // Update commit fileCount if we have commits and diffstat
+            if (enhancedPR.commits && enhancedPR.commits.length > 0 && enhancedPR.diffStat.totalFiles > 0) {
+              // For simplicity, assign total files to the most recent commit
+              // In a real scenario, you'd need to fetch diffstat per commit
+              const latestCommit = enhancedPR.commits[enhancedPR.commits.length - 1];
+              if (latestCommit) {
+                latestCommit.fileCount = enhancedPR.diffStat.totalFiles;
+              }
+              
+              // Also update any commits that have fileCount: 0 from Jira dev-status
+              enhancedPR.commits.forEach(commit => {
+                if (commit.fileCount === 0 || commit.fileCount === undefined) {
+                  // Don't override merge commits or commits that already have a file count
+                  if (!commit.merge) {
+                    commit.fileCount = enhancedPR.diffStat.totalFiles;
+                  }
+                }
+              });
+            }
+          }
+        } catch (error) {
+          // Could not fetch diffstat for this PR
+        }
+
+        return enhancedPR;
+      }
+      
+      return prMatch;
+    } catch (error) {
+      // Failed to enhance PR with Bitbucket data
+      return prMatch;
+    }
+  }
+
+  /**
+   * Search for PRs by ticket key using targeted approach
+   * @param {string} ticketKey - Jira ticket key
+   * @param {string} repoSlug - Repository slug
+   * @param {Array} states - PR states to search
+   * @returns {Promise<Object>} Search results
+   */
+  async searchPRsByTicketKey(ticketKey, repoSlug, states = ['MERGED', 'OPEN']) {
+    try {
+      const matchingPRs = [];
+      
+      // Search through a limited number of recent PRs looking for ticket key matches
+      // This is much more efficient than fetching all PRs
+      for (const state of states) {
+        const prResponse = await this.bitbucketClient.fetchPullRequests(repoSlug, {
+          state,
+          page: 1,
+          pagelen: 50 // Only check recent 50 PRs per state
+        });
+
+        if (!prResponse.success) {
+          continue; // Skip this state if it fails
+        }
+
+        // Filter PRs that match the ticket key
+        const prsForState = prResponse.data.pullRequests.filter(pr => {
+          // Check if ticket key appears in PR title, description, or branch name
+          const title = (pr.title || '').toUpperCase();
+          const description = (pr.description || '').toUpperCase();
+          const sourceBranch = (pr.source?.branch?.name || '').toUpperCase();
+          const destinationBranch = (pr.destination?.branch?.name || '').toUpperCase();
+          
+          const ticketKeyUpper = ticketKey.toUpperCase();
+          
+          // More flexible matching - handle different formats
+          const ticketParts = ticketKeyUpper.split('-');
+          const projectKey = ticketParts[0]; // e.g., "GROOT"
+          const ticketNumber = ticketParts[1]; // e.g., "286"
+          
+          // Check for exact ticket key
+          const exactMatch = title.includes(ticketKeyUpper) ||
+                            description.includes(ticketKeyUpper) ||
+                            sourceBranch.includes(ticketKeyUpper) ||
+                            destinationBranch.includes(ticketKeyUpper);
+          
+          // Check for flexible formats like "groot-286", "groot_286", etc.
+          const flexibleFormats = [
+            `${projectKey}-${ticketNumber}`,
+            `${projectKey}_${ticketNumber}`,
+            `${projectKey}${ticketNumber}`,
+            `${projectKey.toLowerCase()}-${ticketNumber}`,
+            `${projectKey.toLowerCase()}_${ticketNumber}`,
+            `${projectKey.toLowerCase()}${ticketNumber}`
+          ];
+          
+          const flexibleMatch = flexibleFormats.some(format => 
+            title.includes(format.toUpperCase()) ||
+            description.includes(format.toUpperCase()) ||
+            sourceBranch.includes(format.toUpperCase()) ||
+            destinationBranch.includes(format.toUpperCase())
+          );
+          
+          return exactMatch || flexibleMatch;
+        });
+
+        matchingPRs.push(...prsForState);
+      }
+
+      return { success: true, data: matchingPRs };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: 'TARGETED_SEARCH_ERROR',
+          message: `Targeted PR search failed: ${error.message}`
+        }
+      };
+    }
+  }
+
+  /**
+   * Fetch a limited number of PRs for fallback scenarios
+   * @param {string} repoSlug - Repository slug
+   * @param {Array} states - PR states to search
+   * @param {number} limit - Maximum number of PRs to fetch
+   * @returns {Promise<Object>} Limited PR results
+   */
+  async fetchLimitedPRs(repoSlug, states = ['MERGED', 'OPEN'], limit = 50) {
+    try {
+      const prResults = [];
+      let totalFetched = 0;
+
+      for (const state of states) {
+        if (totalFetched >= limit) break;
+
+        const pageSize = Math.min(25, limit - totalFetched);
+        const prResponse = await this.bitbucketClient.fetchPullRequests(repoSlug, {
+          state,
+          page: 1,
+          pagelen: pageSize
+        });
+
+        if (!prResponse.success) {
+          continue; // Skip this state if it fails
+        }
+
+        prResults.push(...prResponse.data.pullRequests);
+        totalFetched += prResponse.data.pullRequests.length;
+      }
+
+      return { success: true, data: prResults };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: 'LIMITED_FETCH_ERROR',
+          message: `Limited PR fetch failed: ${error.message}`
+        }
+      };
+    }
   }
 } 
