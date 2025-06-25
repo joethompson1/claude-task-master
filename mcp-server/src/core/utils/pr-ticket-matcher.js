@@ -197,26 +197,18 @@ export class PRTicketMatcher {
           try {
             // Extract repo name from the PR or use the provided repoSlug
             const repoName = match.repository || repoSlug;
-            console.log(`🔍 DEBUG: Enhancing PR ${match.id} with repo ${repoName}`);
-            console.log(`   Original has diffStat: ${!!match.diffStat}`);
-            console.log(`   Original has filesChanged: ${!!match.filesChanged}`);
+            // Debug logging removed for MCP compatibility
             
             const enhancedPR = await this.enhancePRWithBitbucketData(match, repoName);
             
-            console.log(`   Enhanced has diffStat: ${!!enhancedPR.diffStat}`);
-            console.log(`   Enhanced has filesChanged: ${!!enhancedPR.filesChanged}`);
-            console.log(`   Enhanced filesChanged length: ${enhancedPR.filesChanged?.length || 0}`);
-            
             enhancedMatches.push(enhancedPR);
           } catch (enhanceError) {
-            console.log(`   Enhancement failed: ${enhanceError.message}`);
-            // If enhancement fails, use the original match
+            // Enhancement failed, use the original match (logging removed for MCP compatibility)
             enhancedMatches.push(match);
           }
         }
       } else {
-        console.log('🔍 DEBUG: Bitbucket client not ready, skipping enhancement');
-        // No Bitbucket client available, use original matches
+        // No Bitbucket client available, use original matches (logging removed for MCP compatibility)
         enhancedMatches.push(...allMatches);
       }
 

@@ -142,13 +142,7 @@ export class ContextAggregator {
           pullRequests = prResult.value.data.pullRequests;
           // Debug: Log PR data details
           if (pullRequests.length > 0 && relationship.issue.jiraKey === 'GROOT-287') {
-            console.log(`\n🔍 DEBUG: PR data for ${relationship.issue.jiraKey}:`);
-            pullRequests.forEach(pr => {
-              console.log(`   PR ${pr.id}:`);
-              console.log(`     Has diffStat: ${!!pr.diffStat}`);
-              console.log(`     Has filesChanged: ${!!pr.filesChanged}`);
-              console.log(`     filesChanged length: ${pr.filesChanged?.length || 0}`);
-            });
+            // Debug logging removed for MCP compatibility
           }
         } else if (Array.isArray(prResult.value)) {
           // Fallback for old format

@@ -223,7 +223,7 @@ function deduplicateTickets(subtasks, relatedContext, log) {
 /**
  * Export the deduplicateTickets function for testing
  */
-export { deduplicateTickets };
+// export { deduplicateTickets };
 
 /**
  * Register the get-task tool with the MCP server
@@ -358,15 +358,6 @@ export function registerShowTaskTool(server) {
 						delete result.data.task._contextImages;
 					}
 
-					// Debug: Log main ticket PR data before serialization
-					if (result.data.task.pullRequests && result.data.task.pullRequests.length > 0) {
-						log.info(`Main ticket has ${result.data.task.pullRequests.length} PRs before serialization`);
-						const firstPR = result.data.task.pullRequests[0];
-						log.info(`First PR ${firstPR.id}: diffStat=${JSON.stringify(firstPR.diffStat)}, filesChanged=${firstPR.filesChanged ? firstPR.filesChanged.length : 0} files`);
-					} else {
-						log.warn(`Main ticket has NO PRs before serialization!`);
-					}
-
 					// Rest of existing response formatting logic...
 					const content = [];
 					content.push({
@@ -494,7 +485,7 @@ function extractAndRemoveContextImages(relatedContext, log) {
  * @param {boolean} withSubtasks - Whether subtasks are included
  * @param {Object} log - Logger instance
  */
-async function addContextToTask(ticket, ticketId, maxRelatedTickets, withSubtasks, log) {
+export async function addContextToTask(ticket, ticketId, maxRelatedTickets, withSubtasks, log) {
 	try {
 		// Check if context services are available
 		const jiraClient = new JiraClient();
@@ -517,49 +508,79 @@ async function addContextToTask(ticket, ticketId, maxRelatedTickets, withSubtask
 		log.info(`Fetching context for ticket ${ticketId}...`);
 
 			// Extract repository information from ticket's development info if available
-	let detectedRepositories = [];
-	
-	// Try to get repository info from development status first
-	if (contextAggregator.prMatcher) {
-		try {
-			const devStatusResult = await contextAggregator.prMatcher.getJiraDevStatus(ticketId);
-			if (devStatusResult.success && devStatusResult.data) {
-				// Extract unique repository names from PRs
-				const repoNames = devStatusResult.data
-					.filter(pr => pr.repository)
-					.map(pr => {
-						// Handle both full paths and repo names
-						const repo = pr.repository;
-						return repo.includes('/') ? repo.split('/')[1] : repo;
-					})
-					.filter((repo, index, arr) => arr.indexOf(repo) === index); // Remove duplicates
-				
-				detectedRepositories = repoNames;
-				log.info(`Detected repositories from development info: ${detectedRepositories.join(', ')}`);
+		let detectedRepositories = [];
+		
+		// Try to get repository info from development status first
+		if (contextAggregator.prMatcher) {
+			try {
+				const devStatusResult = await contextAggregator.prMatcher.getJiraDevStatus(ticketId);
+				if (devStatusResult.success && devStatusResult.data) {
+					// Extract unique repository names from PRs
+					const repoNames = devStatusResult.data
+						.filter(pr => pr.repository)
+						.map(pr => {
+							// Handle both full paths and repo names
+							const repo = pr.repository;
+							return repo.includes('/') ? repo.split('/')[1] : repo;
+						})
+						.filter((repo, index, arr) => arr.indexOf(repo) === index); // Remove duplicates
+					
+					detectedRepositories = repoNames;
+					log.info(`Detected repositories from development info: ${detectedRepositories.join(', ')}`);
+				}
+			} catch (devError) {
+				log.warn(`Could not detect repositories from development info: ${devError.message}`);
 			}
-		} catch (devError) {
-			log.warn(`Could not detect repositories from development info: ${devError.message}`);
 		}
-	}
 	
-	// Get context with configurable maxRelated parameter
-	// Use detected repositories for more targeted PR searches
-	const contextPromise = contextAggregator.aggregateContext(ticketId, {
-		depth: 2,
-		maxRelated: maxRelatedTickets,
-		detectedRepositories: detectedRepositories, // Pass detected repos for smarter PR matching
-		log: {
-			info: (msg) => log.info(msg),
-			warn: (msg) => log.warn(msg),
-			error: (msg) => log.error(msg),
-			debug: (msg) => log.debug ? log.debug(msg) : log.info(`[DEBUG] ${msg}`) // Fallback for debug
-		}
-	});
+		// Get context with configurable maxRelated parameter
+		// Use detected repositories for more targeted PR searches
+		const contextPromise = contextAggregator.aggregateContext(ticketId, {
+			depth: 2,
+			maxRelated: maxRelatedTickets,
+			detectedRepositories: detectedRepositories, // Pass detected repos for smarter PR matching
+			log: {
+				info: (msg) => log.info(msg),
+				warn: (msg) => log.warn(msg),
+				error: (msg) => log.error(msg),
+				debug: (msg) => log.debug ? log.debug(msg) : log.info(`[DEBUG] ${msg}`) // Fallback for debug
+			}
+		});
 
 		// 30-second timeout for context retrieval (matches working test)
 		const timeoutPromise = new Promise((_, reject) =>
 			setTimeout(() => reject(new Error('Context retrieval timeout')), 30000)
 		);
+
+		// CRITICAL FIX: Fetch main ticket PR data BEFORE context aggregation and deduplication
+		// This ensures the main ticket's PR data is available during deduplication
+		if (!ticket.pullRequests || ticket.pullRequests.length === 0) {
+			log.info(`Main ticket ${ticketId} has no PR data, fetching from development status...`);
+			
+			try {
+				// Get PRs for the main ticket from Jira dev status
+				const mainTicketPRs = await prMatcher.getJiraDevStatus(ticketId);
+				
+				if (mainTicketPRs.success && mainTicketPRs.data && mainTicketPRs.data.length > 0) {
+					// The PRs are already enhanced by getJiraDevStatus
+					ticket.pullRequests = mainTicketPRs.data;
+					log.info(`Added ${mainTicketPRs.data.length} PRs to main ticket ${ticketId} BEFORE deduplication`);
+					
+					// Debug log PR details
+					mainTicketPRs.data.forEach(pr => {
+						log.info(`Main ticket PR ${pr.id}: has diffStat=${!!pr.diffStat}, has filesChanged=${!!pr.filesChanged}`);
+						if (pr.diffStat) {
+							log.info(`  - Additions: ${pr.diffStat.additions}, Deletions: ${pr.diffStat.deletions}`);
+						}
+						if (pr.filesChanged) {
+							log.info(`  - Files changed: ${pr.filesChanged.length}`);
+						}
+					});
+				}
+			} catch (prError) {
+				log.warn(`Failed to fetch PR data for main ticket: ${prError.message}`);
+			}
+		}
 
 		const context = await Promise.race([contextPromise, timeoutPromise]);
 
@@ -585,8 +606,6 @@ async function addContextToTask(ticket, ticketId, maxRelatedTickets, withSubtask
 				delete ticket.subtasks;
 			}
 			
-			log.info(`Added unified context with ${deduplicatedData.relationshipSummary.totalUnique} unique related tickets`);
-			
 			// Store context images for later use in the response
 			if (contextImages.length > 0) {
 				ticket._contextImages = contextImages;
@@ -594,36 +613,6 @@ async function addContextToTask(ticket, ticketId, maxRelatedTickets, withSubtask
 			}
 		} else {
 			log.info('No context returned or no relatedContext property');
-		}
-		
-		// CRITICAL FIX: Check if main ticket has PR data after context aggregation
-		// The context aggregator only fetches PR data for related tickets, not the source ticket
-		if (!ticket.pullRequests || ticket.pullRequests.length === 0) {
-			log.info(`Main ticket ${ticketId} has no PR data, fetching from development status...`);
-			
-			try {
-				// Get PRs for the main ticket from Jira dev status
-				const mainTicketPRs = await prMatcher.getJiraDevStatus(ticketId);
-				
-				if (mainTicketPRs.success && mainTicketPRs.data && mainTicketPRs.data.length > 0) {
-					// The PRs are already enhanced by getJiraDevStatus
-					ticket.pullRequests = mainTicketPRs.data;
-					log.info(`Added ${mainTicketPRs.data.length} PRs to main ticket ${ticketId}`);
-					
-					// Debug log PR details
-					mainTicketPRs.data.forEach(pr => {
-						log.info(`Main ticket PR ${pr.id}: has diffStat=${!!pr.diffStat}, has filesChanged=${!!pr.filesChanged}`);
-						if (pr.diffStat) {
-							log.info(`  - Additions: ${pr.diffStat.additions}, Deletions: ${pr.diffStat.deletions}`);
-						}
-						if (pr.filesChanged) {
-							log.info(`  - Files changed: ${pr.filesChanged.length}`);
-						}
-					});
-				}
-			} catch (prError) {
-				log.warn(`Failed to fetch PR data for main ticket: ${prError.message}`);
-			}
 		}
 
 	} catch (error) {
