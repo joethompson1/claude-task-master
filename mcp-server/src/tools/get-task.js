@@ -124,9 +124,9 @@ export function registerShowTaskTool(server) {
 				maxRelatedTickets: z
 					.number()
 					.min(1)
-					.max(50)
+					.max(10)
 					.optional()
-					.default(10)
+					.default(5)
 					.describe('Maximum number of related tickets to fetch in context (default: 10, max: 50)')
 			}),
 			execute: async (args, { log, session }) => {
@@ -150,13 +150,6 @@ export function registerShowTaskTool(server) {
 					if (!result.success) {
 						return createErrorResponse(`Failed to fetch task: ${result.error?.message || 'Unknown error'}`);
 					}
-
-					// return {
-					// 	content: [{
-					// 		type: 'text',
-					// 		text: JSON.stringify(result, null, 2)
-					// 	}]
-					// };
 
 					const task = result.data.task;
 

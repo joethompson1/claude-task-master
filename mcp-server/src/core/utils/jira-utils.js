@@ -18,6 +18,365 @@ import { BitbucketClient } from './bitbucket-client.js';
 import { PRTicketMatcher } from './pr-ticket-matcher.js';
 
 /**
+ * Estimate token count for text content
+ * Rough approximation: 1 token ≈ 4 characters
+ * @param {string} text - Text to estimate tokens for
+ * @returns {number} - Estimated token count
+ */
+function estimateTokenCount(text) {
+	if (!text || typeof text !== 'string') return 0;
+	return Math.ceil(text.length / 4);
+}
+
+/**
+ * Estimate tokens for an object by JSON stringifying it
+ * @param {Object} obj - Object to estimate tokens for
+ * @returns {number} - Estimated token count
+ */
+function estimateObjectTokens(obj) {
+	if (!obj) return 0;
+	try {
+		const jsonString = JSON.stringify(obj);
+		return estimateTokenCount(jsonString);
+	} catch (error) {
+		return 0;
+	}
+}
+
+/**
+ * Trim unnecessary fields from pull request data to reduce token usage
+ * @param {Array} pullRequests - Array of pull request objects
+ * @returns {Array} - Trimmed pull request objects
+ */
+function trimPullRequestFields(pullRequests) {
+	if (!pullRequests || !Array.isArray(pullRequests)) {
+		return pullRequests;
+	}
+
+	return pullRequests.map(pr => {
+		const trimmedPR = { ...pr };
+
+		// Remove avatar field from reviewers
+		if (trimmedPR.reviewers && Array.isArray(trimmedPR.reviewers)) {
+			trimmedPR.reviewers = trimmedPR.reviewers.map(reviewer => {
+				const { avatar, ...trimmedReviewer } = reviewer;
+				return trimmedReviewer;
+			});
+		}
+
+		// Remove unnecessary fields from commits
+		if (trimmedPR.commits && Array.isArray(trimmedPR.commits)) {
+			trimmedPR.commits = trimmedPR.commits.map(commit => {
+				const { hash, shortHash, displayId, url, ...trimmedCommit } = commit;
+				return trimmedCommit;
+			});
+		}
+
+		// Remove avatarUrls from attachments (if they exist)
+		if (trimmedPR.attachments && Array.isArray(trimmedPR.attachments)) {
+			trimmedPR.attachments = trimmedPR.attachments.map(attachment => {
+				const { avatarUrls, ...trimmedAttachment } = attachment;
+				return trimmedAttachment;
+			});
+		}
+
+		return trimmedPR;
+	});
+}
+
+/**
+ * Trim response content to fit within token limits
+ * @param {Object} responseData - Response data to trim
+ * @param {number} maxTokens - Maximum allowed tokens
+ * @param {Object} log - Logger instance
+ * @returns {Object} - Trimmed response data
+ */
+function trimResponseForTokenLimit(responseData, maxTokens, log) {
+	const { task, allTasks, images } = responseData;
+	
+	// Calculate current token usage
+	const mainTaskTokens = estimateObjectTokens(task);
+	const imagesTokens = images ? images.length * 50 : 0; // Rough estimate for image metadata
+	let currentTokens = mainTaskTokens + imagesTokens;
+	
+	log.info(`Initial token estimate: ${currentTokens} (main task: ${mainTaskTokens}, images: ${imagesTokens})`);
+	
+	// If we're already under the limit, return as is
+	if (currentTokens <= maxTokens) {
+		log.info(`Response within token limit (${currentTokens} <= ${maxTokens})`);
+		return responseData;
+	}
+	
+	// Create a copy to modify
+	const trimmedTask = JSON.parse(JSON.stringify(task));
+	let trimmedImages = images ? [...images] : [];
+	
+	// Track trimming statistics
+	const trimStats = {
+		originalRelatedTickets: trimmedTask.relatedTickets ? trimmedTask.relatedTickets.length : 0,
+		removedTickets: 0,
+		removedImages: 0,
+		trimmedPRs: 0,
+		trimmedFields: 0
+	};
+	
+	// Trim in order of importance (least important first)
+	const trimSteps = [
+		{
+			name: 'Remove context images',
+				action: () => {
+					if (trimmedImages.length > 0) {
+						const contextImagesRemoved = trimmedImages.length;
+						trimStats.removedImages = contextImagesRemoved;
+						trimmedImages = [];
+						log.info(`Removed ${contextImagesRemoved} context images`);
+						return contextImagesRemoved * 50; // Rough token savings
+					}
+					return 0;
+				}
+		},
+		{
+			name: 'Trim related tickets by relevance score',
+			action: () => {
+				if (!trimmedTask.relatedTickets || trimmedTask.relatedTickets.length === 0) {
+					return 0;
+				}
+				
+				// Sort related tickets by relevance score (lowest first for removal)
+				// Use the existing relevanceScore property calculated by the context aggregator
+				const sortedTickets = [...trimmedTask.relatedTickets].sort((a, b) => {
+					const scoreA = a.relevanceScore || 0;
+					const scoreB = b.relevanceScore || 0;
+					return scoreA - scoreB; // Ascending order (lowest first for removal)
+				});
+				
+				let tokensFreed = 0;
+				let ticketsRemoved = 0;
+				
+				// Remove tickets one by one until we're under the limit
+				while (sortedTickets.length > 0 && currentTokens > maxTokens) {
+					const removedTicket = sortedTickets.shift();
+					const ticketTokens = estimateObjectTokens(removedTicket);
+					tokensFreed += ticketTokens;
+					currentTokens -= ticketTokens;
+					ticketsRemoved++;
+					
+					log.info(`Removed ticket ${removedTicket.ticket?.jiraKey || removedTicket.ticket?.id || 'unknown'} (relevance: ${removedTicket.relevanceScore || 0})`);
+				}
+				
+				// Update the task with remaining tickets
+				trimmedTask.relatedTickets = sortedTickets;
+				trimStats.removedTickets = ticketsRemoved;
+				
+				if (ticketsRemoved > 0) {
+					log.info(`Removed ${ticketsRemoved} related tickets (saved ~${tokensFreed} tokens)`);
+				}
+				
+				return tokensFreed;
+			}
+		},
+		{
+			name: 'Trim PR data',
+			action: () => {
+				let tokensFreed = 0;
+				let prsRemoved = 0;
+				
+				// Trim PR data from main task
+				if (trimmedTask.pullRequests && trimmedTask.pullRequests.length > 0) {
+					const originalPRs = trimmedTask.pullRequests.length;
+					if (originalPRs > 2) {
+						trimmedTask.pullRequests = trimmedTask.pullRequests.slice(0, 2); // Keep only 2 most recent
+						prsRemoved += (originalPRs - 2);
+						tokensFreed += (originalPRs - 2) * 100; // Rough estimate
+						log.info(`Trimmed PR data from ${originalPRs} to 2 PRs`);
+					}
+				}
+				
+				// Trim PR data from related tickets
+				if (trimmedTask.relatedTickets) {
+					trimmedTask.relatedTickets.forEach(ticket => {
+						if (ticket.pullRequests && ticket.pullRequests.length > 1) {
+							const originalPRs = ticket.pullRequests.length;
+							ticket.pullRequests = ticket.pullRequests.slice(0, 1); // Keep only 1 PR per related ticket
+							prsRemoved += (originalPRs - 1);
+							tokensFreed += (originalPRs - 1) * 50; // Rough estimate
+						}
+					});
+				}
+				
+				trimStats.trimmedPRs = prsRemoved;
+				currentTokens -= tokensFreed;
+				return tokensFreed;
+			}
+		},
+		{
+			name: 'Trim detailed fields',
+			action: () => {
+				let tokensFreed = 0;
+				let fieldsCount = 0;
+				
+				// Trim detailed fields from main task
+				if (trimmedTask.details && trimmedTask.details.length > 500) {
+					const originalLength = trimmedTask.details.length;
+					trimmedTask.details = trimmedTask.details.substring(0, 500) + '... [truncated]';
+					tokensFreed += estimateTokenCount(trimmedTask.details.substring(500));
+					fieldsCount++;
+					log.info(`Truncated main task details from ${originalLength} to 500 characters`);
+				}
+				
+				// Trim detailed fields from related tickets
+				if (trimmedTask.relatedTickets) {
+					trimmedTask.relatedTickets.forEach(ticket => {
+						if (ticket.ticket?.description && ticket.ticket.description.length > 200) {
+							const originalLength = ticket.ticket.description.length;
+							ticket.ticket.description = ticket.ticket.description.substring(0, 200) + '... [truncated]';
+							tokensFreed += estimateTokenCount(ticket.ticket.description.substring(200));
+							fieldsCount++;
+						}
+						if (ticket.ticket?.details && ticket.ticket.details.length > 200) {
+							const originalLength = ticket.ticket.details.length;
+							ticket.ticket.details = ticket.ticket.details.substring(0, 200) + '... [truncated]';
+							tokensFreed += estimateTokenCount(ticket.ticket.details.substring(200));
+							fieldsCount++;
+						}
+					});
+				}
+				
+				trimStats.trimmedFields = fieldsCount;
+				currentTokens -= tokensFreed;
+				return tokensFreed;
+			}
+		},
+		{
+			name: 'Remove remaining related tickets',
+			action: () => {
+				if (trimmedTask.relatedTickets && trimmedTask.relatedTickets.length > 0) {
+					const tokensFreed = estimateObjectTokens(trimmedTask.relatedTickets);
+					const ticketsRemoved = trimmedTask.relatedTickets.length;
+					trimStats.removedTickets += ticketsRemoved;
+					trimmedTask.relatedTickets = [];
+					currentTokens -= tokensFreed;
+					log.info(`Removed all remaining ${ticketsRemoved} related tickets`);
+					return tokensFreed;
+				}
+				return 0;
+			}
+		}
+	];
+	
+	// Execute trim steps until we're under the limit
+	for (const step of trimSteps) {
+		if (currentTokens <= maxTokens) break;
+		
+		const tokensFreed = step.action();
+		if (tokensFreed > 0) {
+			log.info(`${step.name}: freed ~${tokensFreed} tokens, current estimate: ${currentTokens}`);
+		}
+	}
+	
+	// Update relationshipSummary to reflect trimmed data
+	if (trimmedTask.relationshipSummary) {
+		const remainingTickets = trimmedTask.relatedTickets || [];
+		
+		trimmedTask.relationshipSummary = {
+			subtasks: remainingTickets.filter((t) =>
+				t.relationships && t.relationships.some((r) => r.type === 'subtask')
+			).length,
+			dependencies: remainingTickets.filter((t) =>
+				t.relationships && t.relationships.some((r) => r.type === 'dependency')
+			).length,
+			relatedTickets: remainingTickets.filter((t) =>
+				t.relationships && t.relationships.some((r) => r.type === 'related')
+			).length,
+			totalUnique: remainingTickets.length,
+			// Add trimming information
+			trimmedDueToTokenLimit: trimStats.removedTickets > 0,
+			originalTotal: trimStats.originalRelatedTickets,
+			removedForTokenLimit: trimStats.removedTickets
+		};
+	}
+	
+	// Update contextSummary to reflect trimmed data
+	if (trimmedTask.contextSummary) {
+		const remainingTickets = trimmedTask.relatedTickets || [];
+		const completedCount = remainingTickets.filter(t => 
+			t.ticket && (t.ticket.status === 'done' || t.ticket.status === 'Done')
+		).length;
+		const activeCount = remainingTickets.filter(t => 
+			t.ticket && t.ticket.status && !['done', 'Done', 'closed', 'Closed'].includes(t.ticket.status)
+		).length;
+		
+		// Count total PRs from remaining tickets
+		const totalPRs = remainingTickets.reduce((count, ticket) => {
+			return count + (ticket.pullRequests ? ticket.pullRequests.length : 0);
+		}, (trimmedTask.pullRequests ? trimmedTask.pullRequests.length : 0));
+		
+		const mergedPRs = remainingTickets.reduce((count, ticket) => {
+			if (ticket.pullRequests) {
+				return count + ticket.pullRequests.filter(pr => pr.state === 'MERGED').length;
+			}
+			return count;
+		}, (trimmedTask.pullRequests ? trimmedTask.pullRequests.filter(pr => pr.state === 'MERGED').length : 0));
+		
+		// Calculate status breakdown
+		const statusBreakdown = {};
+		remainingTickets.forEach(ticket => {
+			if (ticket.ticket && ticket.ticket.status) {
+				const status = ticket.ticket.status;
+				statusBreakdown[status] = (statusBreakdown[status] || 0) + 1;
+			}
+		});
+		
+		// Calculate average relevance
+		const avgRelevance = remainingTickets.length > 0 
+			? remainingTickets.reduce((sum, t) => sum + (t.relevanceScore || 0), 0) / remainingTickets.length
+			: 0;
+		
+		trimmedTask.contextSummary = {
+			totalRelated: remainingTickets.length,
+			filteredOut: trimStats.originalRelatedTickets - remainingTickets.length,
+			completedWork: completedCount,
+			activeWork: activeCount,
+			totalPRs: totalPRs,
+			mergedPRs: mergedPRs,
+			averageRelevance: Math.round(avgRelevance),
+			statusBreakdown: statusBreakdown,
+			// Add trimming information
+			trimmedDueToTokenLimit: trimStats.removedTickets > 0 || trimStats.removedImages > 0 || trimStats.trimmedPRs > 0,
+			originalContextSize: trimStats.originalRelatedTickets,
+			removedForTokenLimit: {
+				tickets: trimStats.removedTickets,
+				images: trimStats.removedImages,
+				prs: trimStats.trimmedPRs,
+				truncatedFields: trimStats.trimmedFields
+			},
+			tokenLimitApplied: maxTokens
+		};
+	}
+	
+	// Final check
+	const finalTokens = estimateObjectTokens(trimmedTask) + (trimmedImages.length * 50);
+	log.info(`Final token estimate after trimming: ${finalTokens} (target: ${maxTokens})`);
+	
+	if (finalTokens > maxTokens) {
+		log.warn(`Response still exceeds token limit after trimming (${finalTokens} > ${maxTokens})`);
+		// Add a warning to the task
+		trimmedTask._trimWarning = `Response was trimmed to fit within token limits. Some context may be missing.`;
+	}
+	
+	// Log trimming summary
+	if (trimStats.removedTickets > 0 || trimStats.removedImages > 0 || trimStats.trimmedPRs > 0) {
+		log.info(`Trimming summary: ${trimStats.removedTickets} tickets, ${trimStats.removedImages} images, ${trimStats.trimmedPRs} PRs, ${trimStats.trimmedFields} fields truncated`);
+	}
+	
+	return {
+		task: trimmedTask,
+		allTasks: [trimmedTask], // Update allTasks to match trimmed task
+		images: trimmedImages
+	};
+}
+
+/**
  * Fetch a single Jira task details by its key
  * @param {string} taskId - Jira issue key to fetch
  * @param {boolean} [withSubtasks=false] - If true, will fetch subtasks for the parent task
@@ -26,6 +385,7 @@ import { PRTicketMatcher } from './pr-ticket-matcher.js';
  * @param {boolean} [options.includeImages=true] - Whether to fetch and include image attachments
  * @param {boolean} [options.includeContext=false] - Whether to fetch and include related context (PRs, etc.)
  * @param {number} [options.maxRelatedTickets=10] - Maximum number of related tickets for context
+ * @param {number} [options.maxTokens] - Maximum token count (default: 20000)
  * @returns {Promise<Object>} - Task details in Task Master format with allTasks array and any image attachments as base64
  */
 export async function fetchJiraTaskDetails(
@@ -39,7 +399,8 @@ export async function fetchJiraTaskDetails(
 		const {
 			includeImages = true,
 			includeContext = false,
-			maxRelatedTickets = 10
+			maxRelatedTickets = 5,
+			maxTokens = 40000
 		} = options;
 
 		// Check if Jira is enabled using the JiraClient
@@ -56,7 +417,7 @@ export async function fetchJiraTaskDetails(
 		}
 
 		log.info(
-			`Fetching Jira task details for key: ${taskId}${includeImages === false ? ' (excluding images)' : ''}`
+			`Fetching Jira task details for key: ${taskId}${includeImages === false ? ' (excluding images)' : ''}${maxTokens !== 20000 ? ` (max tokens: ${maxTokens})` : ''}`
 		);
 
 		// Fetch the issue with conditional image fetching
@@ -117,6 +478,35 @@ export async function fetchJiraTaskDetails(
 			}
 		}
 
+		// Trim unnecessary fields from PR data to reduce token usage
+		// This happens before token calculation to get accurate savings
+		if (task.pullRequests && task.pullRequests.length > 0) {
+			const originalPRTokens = estimateObjectTokens(task.pullRequests);
+			task.pullRequests = trimPullRequestFields(task.pullRequests);
+			const trimmedPRTokens = estimateObjectTokens(task.pullRequests);
+			const tokensSaved = originalPRTokens - trimmedPRTokens;
+			if (tokensSaved > 0) {
+				log.info(`Trimmed PR fields from main task, saved ~${tokensSaved} tokens`);
+			}
+		}
+
+		// Trim PR fields from related tickets as well
+		if (task.relatedTickets && task.relatedTickets.length > 0) {
+			let totalPRTokensSaved = 0;
+			task.relatedTickets.forEach((relatedItem, index) => {
+				// PR data is in relatedItem.ticket.pullRequests, not relatedItem.pullRequests
+				if (relatedItem.ticket && relatedItem.ticket.pullRequests && relatedItem.ticket.pullRequests.length > 0) {
+					const originalTokens = estimateObjectTokens(relatedItem.ticket.pullRequests);
+					relatedItem.ticket.pullRequests = trimPullRequestFields(relatedItem.ticket.pullRequests);
+					const trimmedTokens = estimateObjectTokens(relatedItem.ticket.pullRequests);
+					totalPRTokensSaved += (originalTokens - trimmedTokens);
+				}
+			});
+			if (totalPRTokensSaved > 0) {
+				log.info(`Trimmed PR fields from related tickets, saved ~${totalPRTokensSaved} tokens`);
+			}
+		}
+
 		// For the allTasks array, include the task itself and its subtasks
 		const allTasks = [task];
 		if (subtasksData && subtasksData.tasks) {
@@ -124,11 +514,16 @@ export async function fetchJiraTaskDetails(
 		}
 
 		// Prepare response data
-		const responseData = {
+		let responseData = {
 			task: task,
 			allTasks: allTasks,
 			images: includeImages ? issue.attachmentImages || [] : []
 		};
+
+		// Apply token limiting if maxTokens is specified and > 0
+		if (maxTokens > 0) {
+			responseData = trimResponseForTokenLimit(responseData, maxTokens, log);
+		}
 
 		return {
 			success: true,
@@ -456,7 +851,8 @@ export async function createJiraIssue(jiraTicket, log) {
 				);
 				log.info('Retrying issue creation without priority field...');
 
-				// Remove priority from the request
+				// Get the request body and remove priority from it
+				const requestBody = jiraTicket.toJiraRequestData();
 				if (requestBody.fields.priority) {
 					delete requestBody.fields.priority;
 				}
@@ -468,21 +864,21 @@ export async function createJiraIssue(jiraTicket, log) {
 						'/rest/api/3/issue',
 						requestBody
 					);
+
+					// Return success with data from retry
+					return {
+						success: true,
+						data: {
+							key: retryResponse.data.key,
+							id: retryResponse.data.id,
+							self: retryResponse.data.self,
+							note: 'Created without priority field due to screen configuration'
+						}
+					};
 				} catch (retryError) {
 					log.error(`Error creating Jira issue: ${retryError.message}`);
 					throw retryError;
 				}
-
-				// Return success with data from retry
-				return {
-					success: true,
-					data: {
-						key: retryResponse.data.key,
-						id: retryResponse.data.id,
-						self: retryResponse.data.self,
-						note: 'Created without priority field due to screen configuration'
-					}
-				};
 			}
 
 			// If it's not a priority error or retry fails, throw the error to be caught by outer catch

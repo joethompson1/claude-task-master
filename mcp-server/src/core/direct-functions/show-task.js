@@ -150,7 +150,7 @@ export async function showJiraTaskDirect(args, log) {
 			taskId,
 			withSubtasks,
 			log,
-			{ includeImages, includeContext, maxRelatedTickets }
+			{ includeImages, includeContext, maxRelatedTickets, maxTokens: 40000 }
 		);
 
 		// Restore normal logging before returning
