@@ -1111,6 +1111,8 @@ export class JiraTicket {
 		const statusMapping = {
 			'To Do': 'pending',
 			'In Progress': 'in-progress',
+			'In Review': 'in-review',
+			'In review': 'in-review',  // Handle lowercase 'review'
 			Done: 'done',
 			Blocked: 'blocked',
 			Deferred: 'deferred',

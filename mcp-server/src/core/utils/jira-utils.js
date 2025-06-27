@@ -1231,13 +1231,20 @@ export async function findNextJiraTask(parentKey, log) {
 				.map((t) => t.id)
 		);
 
-		// Filter for pending tasks whose dependencies are all satisfied
+		// Filter for tasks that are ready to be worked on (excluding in-review, completed, or blocked states)
 		const eligibleTasks = allTasks.filter(
-			(task) =>
-				task.status === 'pending' && // Only tasks with pending status
-				(!task.dependencies || // No dependencies, or
+			(task) => {
+				// Only include tasks that are truly available to start work on
+				const isAvailableStatus = task.status === 'pending' || task.status === 'to-do';
+				// Exclude tasks that are in review, completed, blocked, or in progress
+				const isNotInActiveOrCompletedState = !['in-review', 'done', 'completed', 'in-progress', 'blocked', 'deferred', 'cancelled'].includes(task.status);
+				
+				return isAvailableStatus && isNotInActiveOrCompletedState && (
+					!task.dependencies || // No dependencies, or
 					task.dependencies.length === 0 || // Empty dependencies array, or
-					task.dependencies.every((depId) => completedTaskIds.has(depId))) // All dependencies completed
+					task.dependencies.every((depId) => completedTaskIds.has(depId)) // All dependencies completed
+				);
+			}
 		);
 
 		if (eligibleTasks.length === 0) {
