@@ -31,7 +31,7 @@ const prdSingleTaskSchema = z.object({
 });
 
 // Define the Zod schema for the ENTIRE expected AI response object
-const prdResponseSchema = z.object({
+export const prdResponseSchema = z.object({
 	tasks: z.array(prdSingleTaskSchema),
 	metadata: z.object({
 		projectName: z.string(),
