@@ -760,10 +760,10 @@ export async function fetchTasksFromJira(parentKey, withSubtasks = false, log) {
 }
 
 /**
- * Create a Jira issue (task or subtask)
- * @param {JiraTicket} jiraTicket - The jira ticket object to create
+ * Create a Jira issue using the JiraTicket class
+ * @param {JiraTicket} jiraTicket - JiraTicket instance with all the data
  * @param {Object} log - Logger object
- * @returns {Promise<Object>} - Result object with success status and data/error
+ * @returns {Promise<Object>} Result object with success status and data/error
  */
 export async function createJiraIssue(jiraTicket, log) {
 	try {
@@ -801,17 +801,49 @@ export async function createJiraIssue(jiraTicket, log) {
 			};
 		}
 
+		// Client-side validation: Check parent key existence if provided
+		if (jiraTicket.parentKey) {
+			try {
+				const client = jiraClient.getClient();
+				await client.get(`/rest/api/3/issue/${jiraTicket.parentKey}`);
+				log.info(`✓ Parent key ${jiraTicket.parentKey} validated`);
+			} catch (parentError) {
+				const errorMessage = parentError.response?.status === 404 
+					? `Parent issue '${jiraTicket.parentKey}' does not exist or is not accessible`
+					: `Failed to validate parent issue '${jiraTicket.parentKey}': ${parentError.message}`;
+				
+				return {
+					success: false,
+					error: {
+						code: 'INVALID_PARENT_KEY',
+						message: errorMessage,
+						field: 'parentKey',
+						value: jiraTicket.parentKey,
+						suggestion: 'Please verify the parent issue key exists and you have access to it'
+					}
+				};
+			}
+		}
+
 		// For subtasks, parentKey is required
 		if (jiraTicket.issueType === 'Subtask' && !jiraTicket.parentKey) {
 			return {
 				success: false,
 				error: {
 					code: 'MISSING_PARAMETER',
-					message: 'Parent issue key is required for Subtask creation'
+					message: 'Parent issue key is required for Subtask creation',
+					field: 'parentKey',
+					suggestion: 'Provide a valid parent issue key when creating subtasks'
 				}
 			};
 		}
 
+		// Generate request payload for debugging
+		const requestPayload = jiraTicket.toJiraRequestData();
+		
+		// Log request details for debugging (without sensitive data)
+		log.info(`Creating ${jiraTicket.issueType} with fields: ${Object.keys(requestPayload.fields).join(', ')}`);
+		
 		if (jiraTicket.issueType === 'Subtask') {
 			log.info(`Creating Jira subtask under parent ${jiraTicket.parentKey}`);
 		} else {
@@ -826,7 +858,7 @@ export async function createJiraIssue(jiraTicket, log) {
 			const client = jiraClient.getClient();
 			const response = await client.post(
 				'/rest/api/3/issue',
-				jiraTicket.toJiraRequestData()
+				requestPayload
 			);
 
 			// Return success with data
@@ -839,22 +871,66 @@ export async function createJiraIssue(jiraTicket, log) {
 				}
 			};
 		} catch (requestError) {
-			// Check if the error is related to the priority field
-			const isPriorityError =
-				requestError.response?.data?.errors?.priority ===
-				"Field 'priority' cannot be set. It is not on the appropriate screen, or unknown.";
+			// Enhanced error handling with specific field validation
+			const errorResponse = requestError.response?.data;
+			const specificErrors = errorResponse?.errors || {};
+			const errorMessages = errorResponse?.errorMessages || [];
+			
+			// Check for specific field errors and provide helpful messages
+			const fieldErrors = [];
+			
+			if (specificErrors.priority) {
+				fieldErrors.push({
+					field: 'priority',
+					error: specificErrors.priority,
+					suggestion: 'The priority field may not be available on your Jira screen configuration. Try without priority or contact your Jira admin.'
+				});
+			}
+			
+			if (specificErrors.parent) {
+				fieldErrors.push({
+					field: 'parent',
+					error: specificErrors.parent,
+					suggestion: `Parent issue '${jiraTicket.parentKey}' was not found. Verify the issue key exists and you have access to it.`
+				});
+			}
+			
+			if (specificErrors.issuetype) {
+				fieldErrors.push({
+					field: 'issueType',
+					error: specificErrors.issuetype,
+					suggestion: `Issue type '${jiraTicket.issueType}' may not be valid for this project. Check available issue types in your Jira project.`
+				});
+			}
+			
+			if (specificErrors.assignee) {
+				fieldErrors.push({
+					field: 'assignee',
+					error: specificErrors.assignee,
+					suggestion: `Assignee '${jiraTicket.assignee}' may not be valid. Use account ID or verify the user exists.`
+				});
+			}
+			
+			if (specificErrors.description) {
+				fieldErrors.push({
+					field: 'description',
+					error: specificErrors.description,
+					suggestion: 'There may be an issue with the markdown formatting or ADF conversion. Try simplifying the description content.'
+				});
+			}
+
+			// Check if the error is related to the priority field (legacy handling)
+			const isPriorityError = specificErrors.priority === "Field 'priority' cannot be set. It is not on the appropriate screen, or unknown.";
 
 			// If it's a priority field error and we included priority, retry without it
 			if (isPriorityError && jiraTicket.priority) {
-				log.warn(
-					`Priority field error detected: ${requestError.response.data.errors.priority}`
-				);
+				log.warn(`Priority field error detected: ${specificErrors.priority}`);
 				log.info('Retrying issue creation without priority field...');
 
 				// Get the request body and remove priority from it
-				const requestBody = jiraTicket.toJiraRequestData();
-				if (requestBody.fields.priority) {
-					delete requestBody.fields.priority;
+				const retryPayload = { ...requestPayload };
+				if (retryPayload.fields.priority) {
+					delete retryPayload.fields.priority;
 				}
 
 				try {
@@ -862,7 +938,7 @@ export async function createJiraIssue(jiraTicket, log) {
 					const client = jiraClient.getClient();
 					const retryResponse = await client.post(
 						'/rest/api/3/issue',
-						requestBody
+						retryPayload
 					);
 
 					// Return success with data from retry
@@ -876,7 +952,7 @@ export async function createJiraIssue(jiraTicket, log) {
 						}
 					};
 				} catch (retryError) {
-					log.error(`Error creating Jira issue: ${retryError.message}`);
+					log.error(`Error creating Jira issue on retry: ${retryError.message}`);
 					throw retryError;
 				}
 			}
@@ -892,6 +968,32 @@ export async function createJiraIssue(jiraTicket, log) {
 				: jiraTicket.issueType.toLowerCase();
 		log.error(`Error creating Jira ${issueTypeDisplay}: ${error.message}`);
 
+		// Enhanced error details for debugging
+		const errorResponse = error.response?.data;
+		const specificErrors = errorResponse?.errors || {};
+		const errorMessages = errorResponse?.errorMessages || [];
+		
+		// Build field-specific error information
+		const fieldErrors = [];
+		Object.entries(specificErrors).forEach(([field, message]) => {
+			fieldErrors.push({
+				field,
+				error: message,
+				suggestion: getFieldErrorSuggestion(field, message, jiraTicket)
+			});
+		});
+
+		// Create enhanced error message
+		let enhancedMessage = error.response?.data?.errorMessages?.join(', ') || error.message;
+		
+		if (fieldErrors.length > 0) {
+			const fieldErrorDetails = fieldErrors.map(fe => 
+				`Field '${fe.field}': ${fe.error}`
+			).join('\n- ');
+			
+			enhancedMessage = `Jira API validation failed (${error.response?.status || 'Unknown'})\n- ${fieldErrorDetails}`;
+		}
+
 		// Debug: Log the full error object to see what's available
 		const errorDetails = {
 			message: error.message,
@@ -899,8 +1001,10 @@ export async function createJiraIssue(jiraTicket, log) {
 			status: error.response?.status,
 			statusText: error.response?.statusText,
 			data: error.response?.data || {},
-			errorMessages: error.response?.data?.errorMessages || [],
-			errors: error.response?.data?.errors || {},
+			errorMessages: errorMessages,
+			errors: specificErrors,
+			fieldErrors: fieldErrors,
+			requestPayload: jiraTicket.toJiraRequestData(), // Include request payload for debugging
 			headers: error.response?.headers
 				? Object.keys(error.response.headers)
 				: [],
@@ -916,33 +1020,46 @@ export async function createJiraIssue(jiraTicket, log) {
 			code: error.code || 'NO_CODE'
 		};
 
-		// Create a more descriptive error message
-		const errorMessage = [
-			error.response?.status
-				? `${error.response.status} ${error.response.statusText || ''}`
-				: '',
-			error.response?.data?.errorMessages
-				? error.response.data.errorMessages.join(', ')
-				: error.message,
-			error.response?.data?.errors
-				? JSON.stringify(error.response.data.errors)
-				: '',
-			error.code ? `(Error code: ${error.code})` : ''
-		]
-			.filter(Boolean)
-			.join(' - ');
-
-		// Return structured error response
+		// Return structured error response with enhanced information
 		return {
 			success: false,
 			error: {
 				code: error.response?.status || error.code || 'JIRA_API_ERROR',
-				message:
-					error.response?.data?.errorMessages?.join(', ') || error.message,
+				message: enhancedMessage,
 				details: errorDetails,
-				displayMessage: errorMessage
+				fieldErrors: fieldErrors,
+				displayMessage: enhancedMessage,
+				suggestions: fieldErrors.map(fe => fe.suggestion).filter(Boolean)
 			}
 		};
+	}
+}
+
+/**
+ * Get field-specific error suggestions
+ * @param {string} field - The field that caused the error
+ * @param {string} message - The error message from Jira
+ * @param {JiraTicket} jiraTicket - The ticket data for context
+ * @returns {string} Helpful suggestion for the user
+ */
+function getFieldErrorSuggestion(field, message, jiraTicket) {
+	switch (field) {
+		case 'priority':
+			return 'The priority field may not be available on your Jira screen configuration. Try without priority or contact your Jira admin.';
+		case 'parent':
+			return `Parent issue '${jiraTicket.parentKey}' was not found. Verify the issue key exists and you have access to it.`;
+		case 'issuetype':
+			return `Issue type '${jiraTicket.issueType}' may not be valid for this project. Check available issue types in your Jira project.`;
+		case 'assignee':
+			return `Assignee '${jiraTicket.assignee}' may not be valid. Use account ID or verify the user exists.`;
+		case 'description':
+			return 'There may be an issue with the markdown formatting or ADF conversion. Try simplifying the description content.';
+		case 'labels':
+			return 'One or more labels may not be valid. Check if labels are enabled in your project and use valid label names.';
+		case 'project':
+			return 'Project configuration issue. Verify your Jira project key is correct in the environment settings.';
+		default:
+			return `Field '${field}' validation failed: ${message}. Check the field value and project configuration.`;
 	}
 }
 
