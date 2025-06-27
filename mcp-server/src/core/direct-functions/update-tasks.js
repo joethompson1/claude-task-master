@@ -5,6 +5,10 @@
 
 import path from 'path';
 import { updateTasks } from '../../../../scripts/modules/task-manager.js';
+import {
+	enableSilentMode,
+	disableSilentMode
+} from '../../../../scripts/modules/utils.js';
 import { createLogWrapper } from '../../tools/utils.js';
 import { updateJiraIssues } from '../utils/jira-utils.js';
 /**
@@ -184,8 +188,7 @@ export async function updateJiraTasksDirect(args, log, context = {}) {
 			// Execute core updateJiraTasks function, passing the AI client and session
 			const result = await updateJiraIssues(taskIds, prompt, useResearch, {
 				mcpLog: logWrapper, // Pass the wrapper instead of the raw log object
-				session,
-				projectRoot
+				session
 			});
 
 			// Return success message with details from the core function result
