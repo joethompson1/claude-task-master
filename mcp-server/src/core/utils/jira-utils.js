@@ -12,6 +12,369 @@ import { JiraTicket } from './jira-ticket.js';
 import { JiraClient } from './jira-client.js';
 import { Anthropic } from '@anthropic-ai/sdk';
 import sharp from 'sharp';
+import { ContextAggregator } from './context-aggregator.js';
+import { JiraRelationshipResolver } from './jira-relationship-resolver.js';
+import { BitbucketClient } from './bitbucket-client.js';
+import { PRTicketMatcher } from './pr-ticket-matcher.js';
+
+/**
+ * Estimate token count for text content
+ * Rough approximation: 1 token ≈ 4 characters
+ * @param {string} text - Text to estimate tokens for
+ * @returns {number} - Estimated token count
+ */
+function estimateTokenCount(text) {
+	if (!text || typeof text !== 'string') return 0;
+	return Math.ceil(text.length / 4);
+}
+
+/**
+ * Estimate tokens for an object by JSON stringifying it
+ * @param {Object} obj - Object to estimate tokens for
+ * @returns {number} - Estimated token count
+ */
+function estimateObjectTokens(obj) {
+	if (!obj) return 0;
+	try {
+		const jsonString = JSON.stringify(obj);
+		return estimateTokenCount(jsonString);
+	} catch (error) {
+		return 0;
+	}
+}
+
+/**
+ * Trim unnecessary fields from pull request data to reduce token usage
+ * @param {Array} pullRequests - Array of pull request objects
+ * @returns {Array} - Trimmed pull request objects
+ */
+function trimPullRequestFields(pullRequests) {
+	if (!pullRequests || !Array.isArray(pullRequests)) {
+		return pullRequests;
+	}
+
+	return pullRequests.map(pr => {
+		const trimmedPR = { ...pr };
+
+		// Remove avatar field from reviewers
+		if (trimmedPR.reviewers && Array.isArray(trimmedPR.reviewers)) {
+			trimmedPR.reviewers = trimmedPR.reviewers.map(reviewer => {
+				const { avatar, ...trimmedReviewer } = reviewer;
+				return trimmedReviewer;
+			});
+		}
+
+		// Remove unnecessary fields from commits
+		if (trimmedPR.commits && Array.isArray(trimmedPR.commits)) {
+			trimmedPR.commits = trimmedPR.commits.map(commit => {
+				const { hash, shortHash, displayId, url, ...trimmedCommit } = commit;
+				return trimmedCommit;
+			});
+		}
+
+		// Remove avatarUrls from attachments (if they exist)
+		if (trimmedPR.attachments && Array.isArray(trimmedPR.attachments)) {
+			trimmedPR.attachments = trimmedPR.attachments.map(attachment => {
+				const { avatarUrls, ...trimmedAttachment } = attachment;
+				return trimmedAttachment;
+			});
+		}
+
+		return trimmedPR;
+	});
+}
+
+/**
+ * Trim response content to fit within token limits
+ * @param {Object} responseData - Response data to trim
+ * @param {number} maxTokens - Maximum allowed tokens
+ * @param {Object} log - Logger instance
+ * @returns {Object} - Trimmed response data
+ */
+function trimResponseForTokenLimit(responseData, maxTokens, log) {
+	const { task, allTasks, images } = responseData;
+	
+	// Calculate current token usage
+	const mainTaskTokens = estimateObjectTokens(task);
+	const imagesTokens = images ? images.length * 50 : 0; // Rough estimate for image metadata
+	let currentTokens = mainTaskTokens + imagesTokens;
+	
+	log.info(`Initial token estimate: ${currentTokens} (main task: ${mainTaskTokens}, images: ${imagesTokens})`);
+	
+	// If we're already under the limit, return as is
+	if (currentTokens <= maxTokens) {
+		log.info(`Response within token limit (${currentTokens} <= ${maxTokens})`);
+		return responseData;
+	}
+	
+	// Create a copy to modify
+	const trimmedTask = JSON.parse(JSON.stringify(task));
+	let trimmedImages = images ? [...images] : [];
+	
+	// Track trimming statistics
+	const trimStats = {
+		originalRelatedTickets: trimmedTask.relatedTickets ? trimmedTask.relatedTickets.length : 0,
+		removedTickets: 0,
+		removedImages: 0,
+		trimmedPRs: 0,
+		trimmedFields: 0
+	};
+	
+	// Trim in order of importance (least important first)
+	const trimSteps = [
+		{
+			name: 'Remove context images',
+				action: () => {
+					if (trimmedImages.length > 0) {
+						const contextImagesRemoved = trimmedImages.length;
+						trimStats.removedImages = contextImagesRemoved;
+						trimmedImages = [];
+						log.info(`Removed ${contextImagesRemoved} context images`);
+						return contextImagesRemoved * 50; // Rough token savings
+					}
+					return 0;
+				}
+		},
+		{
+			name: 'Trim related tickets by relevance score',
+			action: () => {
+				if (!trimmedTask.relatedTickets || trimmedTask.relatedTickets.length === 0) {
+					return 0;
+				}
+				
+				// Sort related tickets by relevance score (lowest first for removal)
+				// Use the existing relevanceScore property calculated by the context aggregator
+				const sortedTickets = [...trimmedTask.relatedTickets].sort((a, b) => {
+					const scoreA = a.relevanceScore || 0;
+					const scoreB = b.relevanceScore || 0;
+					return scoreA - scoreB; // Ascending order (lowest first for removal)
+				});
+				
+				let tokensFreed = 0;
+				let ticketsRemoved = 0;
+				
+				// Remove tickets one by one until we're under the limit
+				while (sortedTickets.length > 0 && currentTokens > maxTokens) {
+					const removedTicket = sortedTickets.shift();
+					const ticketTokens = estimateObjectTokens(removedTicket);
+					tokensFreed += ticketTokens;
+					currentTokens -= ticketTokens;
+					ticketsRemoved++;
+					
+					log.info(`Removed ticket ${removedTicket.ticket?.jiraKey || removedTicket.ticket?.id || 'unknown'} (relevance: ${removedTicket.relevanceScore || 0})`);
+				}
+				
+				// Update the task with remaining tickets
+				trimmedTask.relatedTickets = sortedTickets;
+				trimStats.removedTickets = ticketsRemoved;
+				
+				if (ticketsRemoved > 0) {
+					log.info(`Removed ${ticketsRemoved} related tickets (saved ~${tokensFreed} tokens)`);
+				}
+				
+				return tokensFreed;
+			}
+		},
+		{
+			name: 'Trim PR data',
+			action: () => {
+				let tokensFreed = 0;
+				let prsRemoved = 0;
+				
+				// Trim PR data from main task
+				if (trimmedTask.pullRequests && trimmedTask.pullRequests.length > 0) {
+					const originalPRs = trimmedTask.pullRequests.length;
+					if (originalPRs > 2) {
+						trimmedTask.pullRequests = trimmedTask.pullRequests.slice(0, 2); // Keep only 2 most recent
+						prsRemoved += (originalPRs - 2);
+						tokensFreed += (originalPRs - 2) * 100; // Rough estimate
+						log.info(`Trimmed PR data from ${originalPRs} to 2 PRs`);
+					}
+				}
+				
+				// Trim PR data from related tickets
+				if (trimmedTask.relatedTickets) {
+					trimmedTask.relatedTickets.forEach(ticket => {
+						if (ticket.pullRequests && ticket.pullRequests.length > 1) {
+							const originalPRs = ticket.pullRequests.length;
+							ticket.pullRequests = ticket.pullRequests.slice(0, 1); // Keep only 1 PR per related ticket
+							prsRemoved += (originalPRs - 1);
+							tokensFreed += (originalPRs - 1) * 50; // Rough estimate
+						}
+					});
+				}
+				
+				trimStats.trimmedPRs = prsRemoved;
+				currentTokens -= tokensFreed;
+				return tokensFreed;
+			}
+		},
+		{
+			name: 'Trim detailed fields',
+			action: () => {
+				let tokensFreed = 0;
+				let fieldsCount = 0;
+				
+				// Trim detailed fields from main task
+				if (trimmedTask.details && trimmedTask.details.length > 500) {
+					const originalLength = trimmedTask.details.length;
+					trimmedTask.details = trimmedTask.details.substring(0, 500) + '... [truncated]';
+					tokensFreed += estimateTokenCount(trimmedTask.details.substring(500));
+					fieldsCount++;
+					log.info(`Truncated main task details from ${originalLength} to 500 characters`);
+				}
+				
+				// Trim detailed fields from related tickets
+				if (trimmedTask.relatedTickets) {
+					trimmedTask.relatedTickets.forEach(ticket => {
+						if (ticket.ticket?.description && ticket.ticket.description.length > 200) {
+							const originalLength = ticket.ticket.description.length;
+							ticket.ticket.description = ticket.ticket.description.substring(0, 200) + '... [truncated]';
+							tokensFreed += estimateTokenCount(ticket.ticket.description.substring(200));
+							fieldsCount++;
+						}
+						if (ticket.ticket?.details && ticket.ticket.details.length > 200) {
+							const originalLength = ticket.ticket.details.length;
+							ticket.ticket.details = ticket.ticket.details.substring(0, 200) + '... [truncated]';
+							tokensFreed += estimateTokenCount(ticket.ticket.details.substring(200));
+							fieldsCount++;
+						}
+					});
+				}
+				
+				trimStats.trimmedFields = fieldsCount;
+				currentTokens -= tokensFreed;
+				return tokensFreed;
+			}
+		},
+		{
+			name: 'Remove remaining related tickets',
+			action: () => {
+				if (trimmedTask.relatedTickets && trimmedTask.relatedTickets.length > 0) {
+					const tokensFreed = estimateObjectTokens(trimmedTask.relatedTickets);
+					const ticketsRemoved = trimmedTask.relatedTickets.length;
+					trimStats.removedTickets += ticketsRemoved;
+					trimmedTask.relatedTickets = [];
+					currentTokens -= tokensFreed;
+					log.info(`Removed all remaining ${ticketsRemoved} related tickets`);
+					return tokensFreed;
+				}
+				return 0;
+			}
+		}
+	];
+	
+	// Execute trim steps until we're under the limit
+	for (const step of trimSteps) {
+		if (currentTokens <= maxTokens) break;
+		
+		const tokensFreed = step.action();
+		if (tokensFreed > 0) {
+			log.info(`${step.name}: freed ~${tokensFreed} tokens, current estimate: ${currentTokens}`);
+		}
+	}
+	
+	// Update relationshipSummary to reflect trimmed data
+	if (trimmedTask.relationshipSummary) {
+		const remainingTickets = trimmedTask.relatedTickets || [];
+		
+		trimmedTask.relationshipSummary = {
+			subtasks: remainingTickets.filter((t) =>
+				t.relationships && t.relationships.some((r) => r.type === 'subtask')
+			).length,
+			dependencies: remainingTickets.filter((t) =>
+				t.relationships && t.relationships.some((r) => r.type === 'dependency')
+			).length,
+			relatedTickets: remainingTickets.filter((t) =>
+				t.relationships && t.relationships.some((r) => r.type === 'related')
+			).length,
+			totalUnique: remainingTickets.length,
+			// Add trimming information
+			trimmedDueToTokenLimit: trimStats.removedTickets > 0,
+			originalTotal: trimStats.originalRelatedTickets,
+			removedForTokenLimit: trimStats.removedTickets
+		};
+	}
+	
+	// Update contextSummary to reflect trimmed data
+	if (trimmedTask.contextSummary) {
+		const remainingTickets = trimmedTask.relatedTickets || [];
+		const completedCount = remainingTickets.filter(t => 
+			t.ticket && (t.ticket.status === 'done' || t.ticket.status === 'Done')
+		).length;
+		const activeCount = remainingTickets.filter(t => 
+			t.ticket && t.ticket.status && !['done', 'Done', 'closed', 'Closed'].includes(t.ticket.status)
+		).length;
+		
+		// Count total PRs from remaining tickets
+		const totalPRs = remainingTickets.reduce((count, ticket) => {
+			return count + (ticket.pullRequests ? ticket.pullRequests.length : 0);
+		}, (trimmedTask.pullRequests ? trimmedTask.pullRequests.length : 0));
+		
+		const mergedPRs = remainingTickets.reduce((count, ticket) => {
+			if (ticket.pullRequests) {
+				return count + ticket.pullRequests.filter(pr => pr.state === 'MERGED').length;
+			}
+			return count;
+		}, (trimmedTask.pullRequests ? trimmedTask.pullRequests.filter(pr => pr.state === 'MERGED').length : 0));
+		
+		// Calculate status breakdown
+		const statusBreakdown = {};
+		remainingTickets.forEach(ticket => {
+			if (ticket.ticket && ticket.ticket.status) {
+				const status = ticket.ticket.status;
+				statusBreakdown[status] = (statusBreakdown[status] || 0) + 1;
+			}
+		});
+		
+		// Calculate average relevance
+		const avgRelevance = remainingTickets.length > 0 
+			? remainingTickets.reduce((sum, t) => sum + (t.relevanceScore || 0), 0) / remainingTickets.length
+			: 0;
+		
+		trimmedTask.contextSummary = {
+			totalRelated: remainingTickets.length,
+			filteredOut: trimStats.originalRelatedTickets - remainingTickets.length,
+			completedWork: completedCount,
+			activeWork: activeCount,
+			totalPRs: totalPRs,
+			mergedPRs: mergedPRs,
+			averageRelevance: Math.round(avgRelevance),
+			statusBreakdown: statusBreakdown,
+			// Add trimming information
+			trimmedDueToTokenLimit: trimStats.removedTickets > 0 || trimStats.removedImages > 0 || trimStats.trimmedPRs > 0,
+			originalContextSize: trimStats.originalRelatedTickets,
+			removedForTokenLimit: {
+				tickets: trimStats.removedTickets,
+				images: trimStats.removedImages,
+				prs: trimStats.trimmedPRs,
+				truncatedFields: trimStats.trimmedFields
+			},
+			tokenLimitApplied: maxTokens
+		};
+	}
+	
+	// Final check
+	const finalTokens = estimateObjectTokens(trimmedTask) + (trimmedImages.length * 50);
+	log.info(`Final token estimate after trimming: ${finalTokens} (target: ${maxTokens})`);
+	
+	if (finalTokens > maxTokens) {
+		log.warn(`Response still exceeds token limit after trimming (${finalTokens} > ${maxTokens})`);
+		// Add a warning to the task
+		trimmedTask._trimWarning = `Response was trimmed to fit within token limits. Some context may be missing.`;
+	}
+	
+	// Log trimming summary
+	if (trimStats.removedTickets > 0 || trimStats.removedImages > 0 || trimStats.trimmedPRs > 0) {
+		log.info(`Trimming summary: ${trimStats.removedTickets} tickets, ${trimStats.removedImages} images, ${trimStats.trimmedPRs} PRs, ${trimStats.trimmedFields} fields truncated`);
+	}
+	
+	return {
+		task: trimmedTask,
+		allTasks: [trimmedTask], // Update allTasks to match trimmed task
+		images: trimmedImages
+	};
+}
 
 /**
  * Fetch a single Jira task details by its key
@@ -20,6 +383,10 @@ import sharp from 'sharp';
  * @param {Object} log - Logger object
  * @param {Object} [options={}] - Additional options
  * @param {boolean} [options.includeImages=true] - Whether to fetch and include image attachments
+ * @param {boolean} [options.includeComments=false] - Whether to fetch and include comments
+ * @param {boolean} [options.includeContext=false] - Whether to fetch and include related context (PRs, etc.)
+ * @param {number} [options.maxRelatedTickets=10] - Maximum number of related tickets for context
+ * @param {number} [options.maxTokens] - Maximum token count (default: 20000)
  * @returns {Promise<Object>} - Task details in Task Master format with allTasks array and any image attachments as base64
  */
 export async function fetchJiraTaskDetails(
@@ -30,7 +397,13 @@ export async function fetchJiraTaskDetails(
 ) {
 	try {
 		// Extract options with defaults
-		const { includeImages = true } = options;
+		const {
+			includeImages = true,
+			includeComments = false,
+			includeContext = false,
+			maxRelatedTickets = 5,
+			maxTokens = 40000
+		} = options;
 
 		// Check if Jira is enabled using the JiraClient
 		const jiraClient = new JiraClient();
@@ -46,14 +419,15 @@ export async function fetchJiraTaskDetails(
 		}
 
 		log.info(
-			`Fetching Jira task details for key: ${taskId}${includeImages === false ? ' (excluding images)' : ''}`
+			`Fetching Jira task details for key: ${taskId}${includeImages === false ? ' (excluding images)' : ''}${includeComments ? ' (including comments)' : ''}${maxTokens !== 20000 ? ` (max tokens: ${maxTokens})` : ''}`
 		);
 
-		// Fetch the issue with conditional image fetching
+		// Fetch the issue with conditional image and comment fetching
 		const issueResult = await jiraClient.fetchIssue(taskId, {
 			log,
 			expand: true,
-			includeImages
+			includeImages,
+			includeComments
 		});
 
 		if (!issueResult.success) {
@@ -67,7 +441,7 @@ export async function fetchJiraTaskDetails(
 		if (withSubtasks) {
 			try {
 				// Use existing function to fetch subtasks
-				subtasksData = await fetchTasksFromJira(taskId, withSubtasks, log);
+				subtasksData = await fetchTasksFromJira(taskId, withSubtasks, log, { includeComments });
 			} catch (subtaskError) {
 				log.warn(
 					`Could not fetch subtasks for ${taskId}: ${subtaskError.message}`
@@ -90,6 +464,52 @@ export async function fetchJiraTaskDetails(
 			task.subtasks = subtasksData.tasks;
 		}
 
+		// Add context if requested and available
+		if (includeContext) {
+			try {
+				await addContextToTask(
+					task,
+					taskId,
+					maxRelatedTickets,
+					withSubtasks,
+					log
+				);
+			} catch (contextError) {
+				// Context failure should not break the main functionality
+				log.warn(`Failed to add context to task ${taskId}: ${contextError.message}`);
+				// Continue without context
+			}
+		}
+
+		// Trim unnecessary fields from PR data to reduce token usage
+		// This happens before token calculation to get accurate savings
+		if (task.pullRequests && task.pullRequests.length > 0) {
+			const originalPRTokens = estimateObjectTokens(task.pullRequests);
+			task.pullRequests = trimPullRequestFields(task.pullRequests);
+			const trimmedPRTokens = estimateObjectTokens(task.pullRequests);
+			const tokensSaved = originalPRTokens - trimmedPRTokens;
+			if (tokensSaved > 0) {
+				log.info(`Trimmed PR fields from main task, saved ~${tokensSaved} tokens`);
+			}
+		}
+
+		// Trim PR fields from related tickets as well
+		if (task.relatedTickets && task.relatedTickets.length > 0) {
+			let totalPRTokensSaved = 0;
+			task.relatedTickets.forEach((relatedItem, index) => {
+				// PR data is in relatedItem.ticket.pullRequests, not relatedItem.pullRequests
+				if (relatedItem.ticket && relatedItem.ticket.pullRequests && relatedItem.ticket.pullRequests.length > 0) {
+					const originalTokens = estimateObjectTokens(relatedItem.ticket.pullRequests);
+					relatedItem.ticket.pullRequests = trimPullRequestFields(relatedItem.ticket.pullRequests);
+					const trimmedTokens = estimateObjectTokens(relatedItem.ticket.pullRequests);
+					totalPRTokensSaved += (originalTokens - trimmedTokens);
+				}
+			});
+			if (totalPRTokensSaved > 0) {
+				log.info(`Trimmed PR fields from related tickets, saved ~${totalPRTokensSaved} tokens`);
+			}
+		}
+
 		// For the allTasks array, include the task itself and its subtasks
 		const allTasks = [task];
 		if (subtasksData && subtasksData.tasks) {
@@ -97,11 +517,16 @@ export async function fetchJiraTaskDetails(
 		}
 
 		// Prepare response data
-		const responseData = {
+		let responseData = {
 			task: task,
 			allTasks: allTasks,
 			images: includeImages ? issue.attachmentImages || [] : []
 		};
+
+		// Apply token limiting if maxTokens is specified and > 0
+		if (maxTokens > 0) {
+			responseData = trimResponseForTokenLimit(responseData, maxTokens, log);
+		}
 
 		return {
 			success: true,
@@ -168,10 +593,17 @@ export function createMCPContentWithImages(taskData, textContent = null) {
  * @param {string} parentKey - Parent Jira issue key, if null will fetch all tasks in the project
  * @param {boolean} [withSubtasks=false] - If true, will fetch subtasks for the parent task
  * @param {Object} log - Logger object
+ * @param {Object} [options={}] - Additional options
+ * @param {boolean} [options.includeComments=false] - Whether to fetch and include comments
  * @returns {Promise<Object>} - Tasks and statistics in Task Master format
  */
-export async function fetchTasksFromJira(parentKey, withSubtasks = false, log) {
+export async function fetchTasksFromJira(parentKey, withSubtasks = false, log, options = {}) {
 	try {
+		// Extract options with defaults
+		const {
+			includeComments = false
+		} = options;
+
 		// Check if Jira is enabled using the JiraClient
 		const jiraClient = new JiraClient();
 
@@ -191,12 +623,12 @@ export async function fetchTasksFromJira(parentKey, withSubtasks = false, log) {
 			// If parentKey is provided, get subtasks for the specific parent
 			jql = `project = "${jiraClient.config.project}" AND parent = "${parentKey}" ORDER BY created ASC`;
 			log.info(
-				`Fetching Jira subtasks for parent ${parentKey} with JQL: ${jql}`
+				`Fetching Jira subtasks for parent ${parentKey} with JQL: ${jql}${includeComments ? ' (including comments)' : ''}`
 			);
 		} else {
 			// If no parentKey, get all tasks in the project
 			jql = `project = "${jiraClient.config.project}" ORDER BY created ASC`;
-			log.info(`Fetching all Jira tasks with JQL: ${jql}`);
+			log.info(`Fetching all Jira tasks with JQL: ${jql}${includeComments ? ' (including comments)' : ''}`);
 		}
 
 		// Use the searchIssues method instead of direct HTTP request
@@ -204,6 +636,7 @@ export async function fetchTasksFromJira(parentKey, withSubtasks = false, log) {
 		const searchResult = await jiraClient.searchIssues(jql, {
 			maxResults: 100,
 			expand: true,
+			includeComments,
 			log
 		});
 
@@ -237,7 +670,8 @@ export async function fetchTasksFromJira(parentKey, withSubtasks = false, log) {
 						const subtasksResult = await fetchTasksFromJira(
 							jiraTicket.jiraKey,
 							false,
-							log
+							log,
+							options
 						);
 						if (subtasksResult && subtasksResult.tasks) {
 							task.subtasks = subtasksResult.tasks;
@@ -338,10 +772,10 @@ export async function fetchTasksFromJira(parentKey, withSubtasks = false, log) {
 }
 
 /**
- * Create a Jira issue (task or subtask)
- * @param {JiraTicket} jiraTicket - The jira ticket object to create
+ * Create a Jira issue using the JiraTicket class
+ * @param {JiraTicket} jiraTicket - JiraTicket instance with all the data
  * @param {Object} log - Logger object
- * @returns {Promise<Object>} - Result object with success status and data/error
+ * @returns {Promise<Object>} Result object with success status and data/error
  */
 export async function createJiraIssue(jiraTicket, log) {
 	try {
@@ -379,17 +813,49 @@ export async function createJiraIssue(jiraTicket, log) {
 			};
 		}
 
+		// Client-side validation: Check parent key existence if provided
+		if (jiraTicket.parentKey) {
+			try {
+				const client = jiraClient.getClient();
+				await client.get(`/rest/api/3/issue/${jiraTicket.parentKey}`);
+				log.info(`✓ Parent key ${jiraTicket.parentKey} validated`);
+			} catch (parentError) {
+				const errorMessage = parentError.response?.status === 404 
+					? `Parent issue '${jiraTicket.parentKey}' does not exist or is not accessible`
+					: `Failed to validate parent issue '${jiraTicket.parentKey}': ${parentError.message}`;
+				
+				return {
+					success: false,
+					error: {
+						code: 'INVALID_PARENT_KEY',
+						message: errorMessage,
+						field: 'parentKey',
+						value: jiraTicket.parentKey,
+						suggestion: 'Please verify the parent issue key exists and you have access to it'
+					}
+				};
+			}
+		}
+
 		// For subtasks, parentKey is required
 		if (jiraTicket.issueType === 'Subtask' && !jiraTicket.parentKey) {
 			return {
 				success: false,
 				error: {
 					code: 'MISSING_PARAMETER',
-					message: 'Parent issue key is required for Subtask creation'
+					message: 'Parent issue key is required for Subtask creation',
+					field: 'parentKey',
+					suggestion: 'Provide a valid parent issue key when creating subtasks'
 				}
 			};
 		}
 
+		// Generate request payload for debugging
+		const requestPayload = jiraTicket.toJiraRequestData();
+		
+		// Log request details for debugging (without sensitive data)
+		log.info(`Creating ${jiraTicket.issueType} with fields: ${Object.keys(requestPayload.fields).join(', ')}`);
+		
 		if (jiraTicket.issueType === 'Subtask') {
 			log.info(`Creating Jira subtask under parent ${jiraTicket.parentKey}`);
 		} else {
@@ -404,7 +870,7 @@ export async function createJiraIssue(jiraTicket, log) {
 			const client = jiraClient.getClient();
 			const response = await client.post(
 				'/rest/api/3/issue',
-				jiraTicket.toJiraRequestData()
+				requestPayload
 			);
 
 			// Return success with data
@@ -417,21 +883,66 @@ export async function createJiraIssue(jiraTicket, log) {
 				}
 			};
 		} catch (requestError) {
-			// Check if the error is related to the priority field
-			const isPriorityError =
-				requestError.response?.data?.errors?.priority ===
-				"Field 'priority' cannot be set. It is not on the appropriate screen, or unknown.";
+			// Enhanced error handling with specific field validation
+			const errorResponse = requestError.response?.data;
+			const specificErrors = errorResponse?.errors || {};
+			const errorMessages = errorResponse?.errorMessages || [];
+			
+			// Check for specific field errors and provide helpful messages
+			const fieldErrors = [];
+			
+			if (specificErrors.priority) {
+				fieldErrors.push({
+					field: 'priority',
+					error: specificErrors.priority,
+					suggestion: 'The priority field may not be available on your Jira screen configuration. Try without priority or contact your Jira admin.'
+				});
+			}
+			
+			if (specificErrors.parent) {
+				fieldErrors.push({
+					field: 'parent',
+					error: specificErrors.parent,
+					suggestion: `Parent issue '${jiraTicket.parentKey}' was not found. Verify the issue key exists and you have access to it.`
+				});
+			}
+			
+			if (specificErrors.issuetype) {
+				fieldErrors.push({
+					field: 'issueType',
+					error: specificErrors.issuetype,
+					suggestion: `Issue type '${jiraTicket.issueType}' may not be valid for this project. Check available issue types in your Jira project.`
+				});
+			}
+			
+			if (specificErrors.assignee) {
+				fieldErrors.push({
+					field: 'assignee',
+					error: specificErrors.assignee,
+					suggestion: `Assignee '${jiraTicket.assignee}' may not be valid. Use account ID or verify the user exists.`
+				});
+			}
+			
+			if (specificErrors.description) {
+				fieldErrors.push({
+					field: 'description',
+					error: specificErrors.description,
+					suggestion: 'There may be an issue with the markdown formatting or ADF conversion. Try simplifying the description content.'
+				});
+			}
+
+			// Check if the error is related to the priority field (legacy handling)
+			const isPriorityError = specificErrors.priority === "Field 'priority' cannot be set. It is not on the appropriate screen, or unknown.";
 
 			// If it's a priority field error and we included priority, retry without it
 			if (isPriorityError && jiraTicket.priority) {
-				log.warn(
-					`Priority field error detected: ${requestError.response.data.errors.priority}`
-				);
+				log.warn(`Priority field error detected: ${specificErrors.priority}`);
 				log.info('Retrying issue creation without priority field...');
 
-				// Remove priority from the request
-				if (requestBody.fields.priority) {
-					delete requestBody.fields.priority;
+				// Get the request body and remove priority from it
+				const retryPayload = { ...requestPayload };
+				if (retryPayload.fields.priority) {
+					delete retryPayload.fields.priority;
 				}
 
 				try {
@@ -439,23 +950,23 @@ export async function createJiraIssue(jiraTicket, log) {
 					const client = jiraClient.getClient();
 					const retryResponse = await client.post(
 						'/rest/api/3/issue',
-						requestBody
+						retryPayload
 					);
+
+					// Return success with data from retry
+					return {
+						success: true,
+						data: {
+							key: retryResponse.data.key,
+							id: retryResponse.data.id,
+							self: retryResponse.data.self,
+							note: 'Created without priority field due to screen configuration'
+						}
+					};
 				} catch (retryError) {
-					log.error(`Error creating Jira issue: ${retryError.message}`);
+					log.error(`Error creating Jira issue on retry: ${retryError.message}`);
 					throw retryError;
 				}
-
-				// Return success with data from retry
-				return {
-					success: true,
-					data: {
-						key: retryResponse.data.key,
-						id: retryResponse.data.id,
-						self: retryResponse.data.self,
-						note: 'Created without priority field due to screen configuration'
-					}
-				};
 			}
 
 			// If it's not a priority error or retry fails, throw the error to be caught by outer catch
@@ -469,6 +980,32 @@ export async function createJiraIssue(jiraTicket, log) {
 				: jiraTicket.issueType.toLowerCase();
 		log.error(`Error creating Jira ${issueTypeDisplay}: ${error.message}`);
 
+		// Enhanced error details for debugging
+		const errorResponse = error.response?.data;
+		const specificErrors = errorResponse?.errors || {};
+		const errorMessages = errorResponse?.errorMessages || [];
+		
+		// Build field-specific error information
+		const fieldErrors = [];
+		Object.entries(specificErrors).forEach(([field, message]) => {
+			fieldErrors.push({
+				field,
+				error: message,
+				suggestion: getFieldErrorSuggestion(field, message, jiraTicket)
+			});
+		});
+
+		// Create enhanced error message
+		let enhancedMessage = error.response?.data?.errorMessages?.join(', ') || error.message;
+		
+		if (fieldErrors.length > 0) {
+			const fieldErrorDetails = fieldErrors.map(fe => 
+				`Field '${fe.field}': ${fe.error}`
+			).join('\n- ');
+			
+			enhancedMessage = `Jira API validation failed (${error.response?.status || 'Unknown'})\n- ${fieldErrorDetails}`;
+		}
+
 		// Debug: Log the full error object to see what's available
 		const errorDetails = {
 			message: error.message,
@@ -476,8 +1013,10 @@ export async function createJiraIssue(jiraTicket, log) {
 			status: error.response?.status,
 			statusText: error.response?.statusText,
 			data: error.response?.data || {},
-			errorMessages: error.response?.data?.errorMessages || [],
-			errors: error.response?.data?.errors || {},
+			errorMessages: errorMessages,
+			errors: specificErrors,
+			fieldErrors: fieldErrors,
+			requestPayload: jiraTicket.toJiraRequestData(), // Include request payload for debugging
 			headers: error.response?.headers
 				? Object.keys(error.response.headers)
 				: [],
@@ -493,33 +1032,46 @@ export async function createJiraIssue(jiraTicket, log) {
 			code: error.code || 'NO_CODE'
 		};
 
-		// Create a more descriptive error message
-		const errorMessage = [
-			error.response?.status
-				? `${error.response.status} ${error.response.statusText || ''}`
-				: '',
-			error.response?.data?.errorMessages
-				? error.response.data.errorMessages.join(', ')
-				: error.message,
-			error.response?.data?.errors
-				? JSON.stringify(error.response.data.errors)
-				: '',
-			error.code ? `(Error code: ${error.code})` : ''
-		]
-			.filter(Boolean)
-			.join(' - ');
-
-		// Return structured error response
+		// Return structured error response with enhanced information
 		return {
 			success: false,
 			error: {
 				code: error.response?.status || error.code || 'JIRA_API_ERROR',
-				message:
-					error.response?.data?.errorMessages?.join(', ') || error.message,
+				message: enhancedMessage,
 				details: errorDetails,
-				displayMessage: errorMessage
+				fieldErrors: fieldErrors,
+				displayMessage: enhancedMessage,
+				suggestions: fieldErrors.map(fe => fe.suggestion).filter(Boolean)
 			}
 		};
+	}
+}
+
+/**
+ * Get field-specific error suggestions
+ * @param {string} field - The field that caused the error
+ * @param {string} message - The error message from Jira
+ * @param {JiraTicket} jiraTicket - The ticket data for context
+ * @returns {string} Helpful suggestion for the user
+ */
+function getFieldErrorSuggestion(field, message, jiraTicket) {
+	switch (field) {
+		case 'priority':
+			return 'The priority field may not be available on your Jira screen configuration. Try without priority or contact your Jira admin.';
+		case 'parent':
+			return `Parent issue '${jiraTicket.parentKey}' was not found. Verify the issue key exists and you have access to it.`;
+		case 'issuetype':
+			return `Issue type '${jiraTicket.issueType}' may not be valid for this project. Check available issue types in your Jira project.`;
+		case 'assignee':
+			return `Assignee '${jiraTicket.assignee}' may not be valid. Use account ID or verify the user exists.`;
+		case 'description':
+			return 'There may be an issue with the markdown formatting or ADF conversion. Try simplifying the description content.';
+		case 'labels':
+			return 'One or more labels may not be valid. Check if labels are enabled in your project and use valid label names.';
+		case 'project':
+			return 'Project configuration issue. Verify your Jira project key is correct in the environment settings.';
+		default:
+			return `Field '${field}' validation failed: ${message}. Check the field value and project configuration.`;
 	}
 }
 
@@ -679,13 +1231,20 @@ export async function findNextJiraTask(parentKey, log) {
 				.map((t) => t.id)
 		);
 
-		// Filter for pending tasks whose dependencies are all satisfied
+		// Filter for tasks that are ready to be worked on (excluding in-review, completed, or blocked states)
 		const eligibleTasks = allTasks.filter(
-			(task) =>
-				task.status === 'pending' && // Only tasks with pending status
-				(!task.dependencies || // No dependencies, or
+			(task) => {
+				// Only include tasks that are truly available to start work on
+				const isAvailableStatus = task.status === 'pending' || task.status === 'to-do';
+				// Exclude tasks that are in review, completed, blocked, or in progress
+				const isNotInActiveOrCompletedState = !['in-review', 'done', 'completed', 'in-progress', 'blocked', 'deferred', 'cancelled'].includes(task.status);
+				
+				return isAvailableStatus && isNotInActiveOrCompletedState && (
+					!task.dependencies || // No dependencies, or
 					task.dependencies.length === 0 || // Empty dependencies array, or
-					task.dependencies.every((depId) => completedTaskIds.has(depId))) // All dependencies completed
+					task.dependencies.every((depId) => completedTaskIds.has(depId)) // All dependencies completed
+				);
+			}
 		);
 
 		if (eligibleTasks.length === 0) {
@@ -2295,5 +2854,464 @@ export async function compressImageIfNeeded(base64Data, mimeType, log) {
 			compressedSize: Buffer.from(base64Data, 'base64').length,
 			compressionFailed: true
 		};
+	}
+}
+
+/**
+ * Relationship priority mapping for determining primary relationship
+ */
+export const RELATIONSHIP_PRIORITY = {
+	subtask: 1,
+	dependency: 2,
+	child: 3,
+	parent: 4,
+	blocks: 5,
+	related: 6
+};
+
+/**
+ * Deduplicate tickets from subtasks and related context into a unified structure
+ * @param {Array} subtasks - Array of subtask objects
+ * @param {Object} relatedContext - Related context with tickets array
+ * @param {Object} log - Logger instance
+ * @returns {Object} - Unified structure with deduplicated tickets
+ */
+export function deduplicateTickets(subtasks, relatedContext, log) {
+	const ticketMap = new Map();
+
+	// Helper function to add or merge relationships
+	const addTicketWithRelationship = (ticket, relationship) => {
+		const ticketId = ticket.jiraKey || ticket.id;
+		if (!ticketId) {
+			log.warn('Ticket found without ID, skipping');
+			return;
+		}
+
+		if (ticketMap.has(ticketId)) {
+			// Merge relationships
+			const existing = ticketMap.get(ticketId);
+			const newRelationships = [...existing.relationships];
+
+			// Check if this relationship type already exists
+			const existingRelType = newRelationships.find(
+				(r) => r.type === relationship.type
+			);
+			if (!existingRelType) {
+				newRelationships.push(relationship);
+			}
+
+			// Update primary relationship if this one has higher priority
+			const currentPrimaryPriority =
+				RELATIONSHIP_PRIORITY[
+					existing.relationships.find((r) => r.primary)?.type
+				] || 999;
+			const newRelationshipPriority =
+				RELATIONSHIP_PRIORITY[relationship.type] || 999;
+
+			if (newRelationshipPriority < currentPrimaryPriority) {
+				// Set all existing to non-primary
+				newRelationships.forEach((r) => (r.primary = false));
+				// Set new one as primary
+				const newRel = newRelationships.find(
+					(r) => r.type === relationship.type
+				);
+				if (newRel) newRel.primary = true;
+			}
+
+			existing.relationships = newRelationships;
+
+			// Merge pull requests - preserve the most detailed version
+			const newPRs = ticket.pullRequests || [];
+			if (newPRs.length > 0) {
+				// Merge PRs by ID, keeping the most detailed version
+				const prMap = new Map();
+
+				// Add existing PRs to map
+				(existing.pullRequests || []).forEach((pr) => {
+					if (pr.id) {
+						prMap.set(pr.id, pr);
+					}
+				});
+
+				// Add/merge new PRs, preferring more detailed versions
+				newPRs.forEach((pr) => {
+					if (pr.id) {
+						const existingPR = prMap.get(pr.id);
+						if (!existingPR) {
+							// New PR, add it
+							prMap.set(pr.id, pr);
+						} else {
+							// PR exists, merge keeping the most detailed version
+							// Prefer PR with diffstat/filesChanged data
+							const hasNewDiffstat = pr.diffStat || pr.filesChanged;
+							const hasExistingDiffstat =
+								existingPR.diffStat || existingPR.filesChanged;
+
+							if (hasNewDiffstat && !hasExistingDiffstat) {
+								// New PR has diffstat, existing doesn't - use new
+								prMap.set(pr.id, pr);
+							} else if (!hasNewDiffstat && hasExistingDiffstat) {
+								// Keep existing PR with diffstat
+								// Do nothing
+							} else {
+								// Both have diffstat or neither has it - merge properties
+								prMap.set(pr.id, {
+									...existingPR,
+									...pr,
+									// Preserve detailed data from whichever has it
+									diffStat: pr.diffStat || existingPR.diffStat,
+									filesChanged:
+										pr.filesChanged || existingPR.filesChanged,
+									commits: pr.commits || existingPR.commits
+								});
+							}
+						}
+					}
+				});
+
+				existing.pullRequests = Array.from(prMap.values());
+			}
+		} else {
+			// Add new ticket
+			ticketMap.set(ticketId, {
+				ticket,
+				relationships: [
+					{
+						...relationship,
+						primary: true
+					}
+				],
+				pullRequests: ticket.pullRequests || [],
+				relevanceScore: ticket.relevanceScore || 100
+			});
+		}
+	};
+
+	// Process subtasks first (highest priority)
+	if (subtasks && Array.isArray(subtasks)) {
+		subtasks.forEach((subtask) => {
+			addTicketWithRelationship(subtask, {
+				type: 'subtask',
+				direction: 'child',
+				depth: 1
+			});
+		});
+		log.info(`Processed ${subtasks.length} subtasks`);
+	}
+
+	// Process related context tickets
+	if (
+		relatedContext &&
+		relatedContext.tickets &&
+		Array.isArray(relatedContext.tickets)
+	) {
+		relatedContext.tickets.forEach((contextItem) => {
+			const ticket = contextItem.ticket;
+			if (ticket) {
+				// Create a ticket object with PR data attached for proper merging
+				const ticketWithPRs = {
+					...ticket,
+					pullRequests: contextItem.pullRequests || [],
+					relevanceScore: contextItem.relevanceScore || 100
+				};
+
+				addTicketWithRelationship(ticketWithPRs, {
+					type: contextItem.relationship || 'related',
+					direction: contextItem.direction || 'unknown',
+					depth: contextItem.depth || 1
+				});
+			}
+		});
+		log.info(
+			`Processed ${relatedContext.tickets.length} related context tickets`
+		);
+	}
+
+	// Convert map to array and calculate summary
+	const relatedTickets = Array.from(ticketMap.values());
+
+	// Calculate relationship summary
+	const relationshipSummary = {
+		subtasks: relatedTickets.filter((t) =>
+			t.relationships.some((r) => r.type === 'subtask')
+		).length,
+		dependencies: relatedTickets.filter((t) =>
+			t.relationships.some((r) => r.type === 'dependency')
+		).length,
+		relatedTickets: relatedTickets.filter((t) =>
+			t.relationships.some((r) => r.type === 'related')
+		).length,
+		totalUnique: relatedTickets.length
+	};
+
+	// Preserve original context summary if available
+	const contextSummary = relatedContext?.summary || {
+		overview: `Found ${relationshipSummary.totalUnique} unique related tickets`,
+		recentActivity: 'No activity information available',
+		completedWork: `${relatedTickets.filter((t) => t.ticket.status === 'done' || t.ticket.status === 'Done').length} tickets completed`,
+		implementationInsights: []
+	};
+
+	log.info(
+		`Deduplicated to ${relationshipSummary.totalUnique} unique tickets from ${(subtasks?.length || 0) + (relatedContext?.tickets?.length || 0)} total`
+	);
+
+	return {
+		relatedTickets,
+		relationshipSummary,
+		contextSummary
+	};
+}
+
+/**
+ * Extract attachment images from context tickets and remove them from the context
+ * @param {Object} relatedContext - The related context object containing tickets
+ * @param {Object} log - Logger instance
+ * @returns {Array} Array of extracted image objects
+ */
+export function extractAndRemoveContextImages(relatedContext, log) {
+	const contextImages = [];
+
+	if (!relatedContext || !relatedContext.tickets) {
+		return contextImages;
+	}
+
+	// Process each context ticket
+	relatedContext.tickets.forEach((contextTicketWrapper, ticketIndex) => {
+		// The structure is: contextTicketWrapper.ticket.attachmentImages
+		// We need to check and remove from the nested ticket object
+		if (
+			contextTicketWrapper.ticket &&
+			contextTicketWrapper.ticket.attachmentImages &&
+			Array.isArray(contextTicketWrapper.ticket.attachmentImages)
+		) {
+			const imageCount = contextTicketWrapper.ticket.attachmentImages.length;
+
+			// Extract images and add metadata about source ticket
+			contextTicketWrapper.ticket.attachmentImages.forEach(
+				(image, imageIndex) => {
+					contextImages.push({
+						...image,
+						sourceTicket:
+							contextTicketWrapper.ticket.key ||
+							`context-ticket-${ticketIndex}`,
+						sourceTicketSummary:
+							contextTicketWrapper.ticket.summary || 'Unknown',
+						contextIndex: ticketIndex,
+						imageIndex: imageIndex
+					});
+				}
+			);
+
+			// Remove the attachmentImages array from the nested ticket object
+			delete contextTicketWrapper.ticket.attachmentImages;
+			log.info(
+				`Extracted ${imageCount} images from context ticket ${contextTicketWrapper.ticket.key}`
+			);
+		}
+
+		// Also check the wrapper level (for backwards compatibility)
+		if (
+			contextTicketWrapper.attachmentImages &&
+			Array.isArray(contextTicketWrapper.attachmentImages)
+		) {
+			const imageCount = contextTicketWrapper.attachmentImages.length;
+
+			// Extract images and add metadata about source ticket
+			contextTicketWrapper.attachmentImages.forEach((image, imageIndex) => {
+				contextImages.push({
+					...image,
+					sourceTicket:
+						contextTicketWrapper.key || `context-ticket-${ticketIndex}`,
+					sourceTicketSummary: contextTicketWrapper.summary || 'Unknown',
+					contextIndex: ticketIndex,
+					imageIndex: imageIndex
+				});
+			});
+
+			// Remove the attachmentImages array from the wrapper
+			delete contextTicketWrapper.attachmentImages;
+			log.info(
+				`Extracted ${imageCount} images from context ticket wrapper ${contextTicketWrapper.key}`
+			);
+		}
+	});
+
+	return contextImages;
+}
+
+/**
+ * Add context to a JiraTicket if context services are available
+ * @param {JiraTicket} ticket - The ticket to enhance with context
+ * @param {string} ticketId - The ticket ID for context lookup
+ * @param {number} maxRelatedTickets - Maximum number of related tickets to fetch
+ * @param {boolean} withSubtasks - Whether subtasks are included
+ * @param {Object} log - Logger instance
+ */
+export async function addContextToTask(
+	ticket,
+	ticketId,
+	maxRelatedTickets,
+	withSubtasks,
+	log
+) {
+	try {
+		// Check if context services are available
+		const jiraClient = new JiraClient();
+		if (!jiraClient.isReady()) {
+			log.info('Jira client not ready, skipping context');
+			return;
+		}
+
+		const bitbucketClient = new BitbucketClient();
+		if (!bitbucketClient.enabled) {
+			log.info('Bitbucket client not enabled, skipping context');
+			return;
+		}
+
+		// Initialize context services
+		const relationshipResolver = new JiraRelationshipResolver(jiraClient);
+		const prMatcher = new PRTicketMatcher(bitbucketClient, jiraClient);
+		const contextAggregator = new ContextAggregator(
+			relationshipResolver,
+			bitbucketClient,
+			prMatcher
+		);
+
+		log.info(`Fetching context for ticket ${ticketId}...`);
+
+		// Extract repository information from ticket's development info if available
+		let detectedRepositories = [];
+
+		// Try to get repository info from development status first
+		if (contextAggregator.prMatcher) {
+			try {
+				const devStatusResult =
+					await contextAggregator.prMatcher.getJiraDevStatus(ticketId);
+				if (devStatusResult.success && devStatusResult.data) {
+					// Extract unique repository names from PRs
+					const repoNames = devStatusResult.data
+						.filter((pr) => pr.repository)
+						.map((pr) => {
+							// Handle both full paths and repo names
+							const repo = pr.repository;
+							return repo.includes('/') ? repo.split('/')[1] : repo;
+						})
+						.filter((repo, index, arr) => arr.indexOf(repo) === index); // Remove duplicates
+
+					detectedRepositories = repoNames;
+					log.info(
+						`Detected repositories from development info: ${detectedRepositories.join(', ')}`
+					);
+				}
+			} catch (devError) {
+				log.warn(
+					`Could not detect repositories from development info: ${devError.message}`
+				);
+			}
+		}
+
+		// Get context with configurable maxRelated parameter
+		// Use detected repositories for more targeted PR searches
+		const contextPromise = contextAggregator.aggregateContext(ticketId, {
+			depth: 2,
+			maxRelated: maxRelatedTickets,
+			detectedRepositories: detectedRepositories, // Pass detected repos for smarter PR matching
+			log: {
+				info: (msg) => log.info(msg),
+				warn: (msg) => log.warn(msg),
+				error: (msg) => log.error(msg),
+				debug: (msg) =>
+					log.debug ? log.debug(msg) : log.info(`[DEBUG] ${msg}`) // Fallback for debug
+			}
+		});
+
+		// 30-second timeout for context retrieval (matches working test)
+		const timeoutPromise = new Promise((_, reject) =>
+			setTimeout(() => reject(new Error('Context retrieval timeout')), 30000)
+		);
+
+		// CRITICAL FIX: Fetch main ticket PR data BEFORE context aggregation and deduplication
+		// This ensures the main ticket's PR data is available during deduplication
+		if (!ticket.pullRequests || ticket.pullRequests.length === 0) {
+			log.info(
+				`Main ticket ${ticketId} has no PR data, fetching from development status...`
+			);
+
+			try {
+				// Get PRs for the main ticket from Jira dev status
+				const mainTicketPRs = await prMatcher.getJiraDevStatus(ticketId);
+
+				if (
+					mainTicketPRs.success &&
+					mainTicketPRs.data &&
+					mainTicketPRs.data.length > 0
+				) {
+					// The PRs are already enhanced by getJiraDevStatus
+					ticket.pullRequests = mainTicketPRs.data;
+					log.info(
+						`Added ${mainTicketPRs.data.length} PRs to main ticket ${ticketId} BEFORE deduplication`
+					);
+
+					// Debug log PR details
+					mainTicketPRs.data.forEach((pr) => {
+						log.info(
+							`Main ticket PR ${pr.id}: has diffStat=${!!pr.diffStat}, has filesChanged=${!!pr.filesChanged}`
+						);
+						if (pr.diffStat) {
+							log.info(
+								`  - Additions: ${pr.diffStat.additions}, Deletions: ${pr.diffStat.deletions}`
+							);
+						}
+						if (pr.filesChanged) {
+							log.info(`  - Files changed: ${pr.filesChanged.length}`);
+						}
+					});
+				}
+			} catch (prError) {
+				log.warn(`Failed to fetch PR data for main ticket: ${prError.message}`);
+			}
+		}
+
+		const context = await Promise.race([contextPromise, timeoutPromise]);
+
+		if (context && context.relatedContext) {
+			// Extract attachment images from context tickets before processing
+			const contextImages = extractAndRemoveContextImages(
+				context.relatedContext,
+				log
+			);
+
+			// Apply deduplication between subtasks and related context
+			const deduplicatedData = deduplicateTickets(
+				ticket.subtasks,
+				context.relatedContext,
+				log
+			);
+
+			// Replace the original structure with the unified deduplicated structure
+			ticket.relatedTickets = deduplicatedData.relatedTickets;
+			ticket.relationshipSummary = deduplicatedData.relationshipSummary;
+			ticket.contextSummary = deduplicatedData.contextSummary;
+
+			// Remove the old separate subtasks field since we now have unified relatedTickets
+			// This eliminates duplication between subtasks and relatedTickets
+			if (ticket.subtasks) {
+				delete ticket.subtasks;
+			}
+
+			// Store context images for later use in the response
+			if (contextImages.length > 0) {
+				ticket._contextImages = contextImages;
+				log.info(
+					`Extracted ${contextImages.length} images from context tickets`
+				);
+			}
+		} else {
+			log.info('No context returned or no relatedContext property');
+		}
+	} catch (error) {
+		log.warn(`Context retrieval failed: ${error.message}`);
+		// Don't throw - context failure shouldn't break main functionality
 	}
 }

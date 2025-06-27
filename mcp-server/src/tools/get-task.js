@@ -13,7 +13,6 @@ import {
 	showTaskDirect,
 	showJiraTaskDirect
 } from '../core/task-master-core.js';
-import { findTasksJsonPath } from '../core/utils/path-utils.js';
 import { JiraClient } from '../core/utils/jira-client.js';
 
 /**
@@ -62,60 +61,38 @@ export function registerShowTaskTool(server) {
 						'Absolute path to the project root directory (Optional, usually from session)'
 					)
 			}),
-			execute: withNormalizedProjectRoot(async (args, { log }) => {
-				const { id, file, status, projectRoot } = args;
-
-				try {
-					log.info(
-						`Getting task details for ID: ${id}${status ? ` (filtering subtasks by status: ${status})` : ''} in root: ${projectRoot}`
-					);
-
-					// Resolve the path to tasks.json using the NORMALIZED projectRoot from args
-					let tasksJsonPath;
+			execute: withNormalizedProjectRoot(
+				async (args, { log, session }, projectRoot) => {
 					try {
-						tasksJsonPath = findTasksJsonPath(
-							{ projectRoot: projectRoot, file: file },
+						log.info(`Session object received in execute: ${JSON.stringify(session)}`);
+
+						log.info(`Getting task details for ID: ${args.id}`);
+
+						const result = await showTaskDirect(
+							{
+								...args,
+								projectRoot
+							},
 							log
 						);
-						log.info(`Resolved tasks path: ${tasksJsonPath}`);
+
+						if (result.success) {
+							// Ensure we return just the task data without allTasks
+							const processedData = processTaskResponse(result.data);
+							log.info(`Successfully retrieved task ${args.id}.`);
+							return handleApiResult({ ...result, data: processedData }, log);
+						} else {
+							log.error(
+								`Failed to get task: ${result.error?.message || 'Unknown error'}`
+							);
+							return handleApiResult(result, log);
+						}
 					} catch (error) {
-						log.error(`Error finding tasks.json: ${error.message}`);
-						return createErrorResponse(
-							`Failed to find tasks.json: ${error.message}`
-						);
+						log.error(`Error in get-task tool: ${error.message}`);
+						return createErrorResponse(error.message);
 					}
-
-					// Call the direct function, passing the normalized projectRoot
-					const result = await showTaskDirect(
-						{
-							tasksJsonPath: tasksJsonPath,
-							id: id,
-							status: status,
-							projectRoot: projectRoot
-						},
-						log
-					);
-
-					if (result.success) {
-						log.info(
-							`Successfully retrieved task details for ID: ${args.id}${result.fromCache ? ' (from cache)' : ''}`
-						);
-					} else {
-						log.error(`Failed to get task: ${result.error.message}`);
-					}
-
-					// Use our custom processor function
-					return handleApiResult(
-						result,
-						log,
-						'Error retrieving task details',
-						processTaskResponse
-					);
-				} catch (error) {
-					log.error(`Error in get-task tool: ${error.message}\n${error.stack}`);
-					return createErrorResponse(`Failed to get task: ${error.message}`);
 				}
-			})
+			)
 		});
 	} else {
 		server.addTool({
@@ -138,41 +115,70 @@ export function registerShowTaskTool(server) {
 					.default(true)
 					.describe(
 						'If true, will fetch and include image attachments (default: true)'
-					)
+					),
+				includeComments: z
+					.boolean()
+					.optional()
+					.default(false)
+					.describe(
+						'If true, will fetch and include comments (default: false)'
+					),
+				includeContext: z
+					.boolean()
+					.optional()
+					.default(true)
+					.describe('If true, will include related tickets and PR context (default: true)'),
+				maxRelatedTickets: z
+					.number()
+					.min(1)
+					.max(10)
+					.optional()
+					.default(5)
+					.describe('Maximum number of related tickets to fetch in context (default: 10, max: 50)')
 			}),
 			execute: async (args, { log, session }) => {
-				// Log the session right at the start of execute
-				log.info(
-					`Session object received in execute: ${JSON.stringify(session)}`
-				); // Use JSON.stringify for better visibility
+				log.info(`Session object received in execute: ${JSON.stringify(session)}`);
 
 				try {
-					log.info(
-						`Getting Jira task details for ID: ${args.id}${args.includeImages === false ? ' (excluding images)' : ''}`
-					);
+					log.info(`Getting Jira task details for ID: ${args.id}${args.includeImages === false ? ' (excluding images)' : ''}${args.includeComments ? ' (including comments)' : ''}${args.includeContext === false ? ' (excluding context)' : args.maxRelatedTickets !== 10 ? ` (max ${args.maxRelatedTickets} related)` : ''}`);
 
+					// Get the base task data first, now with context handling inside
 					const result = await showJiraTaskDirect(
 						{
-							// Only need to pass the ID for Jira tasks
 							id: args.id,
 							withSubtasks: args.withSubtasks,
-							includeImages: args.includeImages
+							includeImages: args.includeImages,
+							includeComments: args.includeComments,
+							includeContext: args.includeContext,
+							maxRelatedTickets: args.maxRelatedTickets
 						},
 						log
 					);
 
+					if (!result.success) {
+						return createErrorResponse(`Failed to fetch task: ${result.error?.message || 'Unknown error'}`);
+					}
+
+					const task = result.data.task;
+
+					// Extract context images before formatting response
+					let contextImages = [];
+					if (task._contextImages && task._contextImages.length > 0) {
+						contextImages = task._contextImages;
+						// Clean up the temporary context images from the ticket object BEFORE JSON.stringify
+						delete task._contextImages;
+					}
+
+					// Rest of existing response formatting logic...
 					const content = [];
 					content.push({
 						type: 'text',
-						text:
-							typeof result.data.task === 'object'
-								? // Format JSON nicely with indentation
-									JSON.stringify(result.data.task, null, 2)
-								: // Keep other content types as-is
-									String(result.data.task)
+						text: typeof task === 'object'
+							? JSON.stringify(task, null, 2)
+							: String(task)
 					});
 
-					// Add each image to the content array (only if images were fetched)
+					// Add main ticket images to the content array
 					if (result.data.images && result.data.images.length > 0) {
 						for (let i = 0; i < result.data.images.length; i++) {
 							const imageData = result.data.images[i];
@@ -180,7 +186,27 @@ export function registerShowTaskTool(server) {
 							// Add image description - filename should now be directly on imageData
 							content.push({
 								type: 'text',
-								text: `Image ${i + 1}: ${imageData.filename || 'Unknown filename'} (${imageData.mimeType}, ${Math.round(imageData.size / 1024)}KB${imageData.isThumbnail ? ', thumbnail' : ''})`
+								text: `Main Ticket Image ${i + 1}: ${imageData.filename || 'Unknown filename'} (${imageData.mimeType}, ${Math.round(imageData.size / 1024)}KB${imageData.isThumbnail ? ', thumbnail' : ''})`
+							});
+
+							// Add the actual image
+							content.push({
+								type: 'image',
+								data: imageData.base64,
+								mimeType: imageData.mimeType
+							});
+						}
+					}
+
+					// Add context images to the content array
+					if (contextImages.length > 0) {
+						for (let i = 0; i < contextImages.length; i++) {
+							const imageData = contextImages[i];
+
+							// Add image description with source ticket info
+							content.push({
+								type: 'text',
+								text: `Context Image ${i + 1} from ${imageData.sourceTicket} (${imageData.sourceTicketSummary}): ${imageData.filename || 'Unknown filename'} (${imageData.mimeType}, ${Math.round(imageData.size / 1024)}KB${imageData.isThumbnail ? ', thumbnail' : ''})`
 							});
 
 							// Add the actual image
@@ -194,12 +220,8 @@ export function registerShowTaskTool(server) {
 
 					return { content };
 				} catch (error) {
-					log.error(
-						`Error in get-jira-task tool: ${error.message}\n${error.stack}`
-					); // Add stack trace
-					return createErrorResponse(
-						`Failed to get Jira task: ${error.message}`
-					);
+					log.error(`Error in get-jira-task tool: ${error.message}\n${error.stack}`);
+					return createErrorResponse(`Failed to get task: ${error.message}`);
 				}
 			}
 		});

@@ -203,6 +203,7 @@ export class JiraClient {
 	 * @param {Object} [options] - Additional options
 	 * @param {boolean} [options.expand=true] - Whether to expand fields like renderedFields
 	 * @param {boolean} [options.includeImages=true] - Whether to fetch and include image attachments
+	 * @param {boolean} [options.includeComments=false] - Whether to fetch and include comments
 	 * @param {Object} [options.log] - Logger object
 	 * @returns {Promise<{success: boolean, data: JiraTicket, error: Object}>} - Result with success status and issue data/error
 	 */
@@ -216,6 +217,8 @@ export class JiraClient {
 		const expand = options.expand !== undefined ? options.expand : true;
 		const includeImages =
 			options.includeImages !== undefined ? options.includeImages : true;
+		const includeComments =
+			options.includeComments !== undefined ? options.includeComments : false;
 
 		try {
 			if (!this.isReady()) {
@@ -226,14 +229,19 @@ export class JiraClient {
 			}
 
 			log.info?.(
-				`Fetching Jira issue with key: ${issueKey}${includeImages === false ? ' (excluding images)' : ''}`
+				`Fetching Jira issue with key: ${issueKey}${includeImages === false ? ' (excluding images)' : ''}${includeComments ? ' (including comments)' : ''}`
 			);
+
+			// Build fields list based on options
+			let fields = 'summary,description,status,priority,issuetype,parent,issuelinks,subtasks,attachment';
+			if (includeComments) {
+				fields += ',comment';
+			}
 
 			const client = this.getClient();
 			const response = await client.get(`/rest/api/3/issue/${issueKey}`, {
 				params: {
-					fields:
-						'summary,description,status,priority,issuetype,parent,issuelinks,subtasks,attachment',
+					fields: fields,
 					...(expand ? { expand: 'renderedFields' } : {})
 				}
 			});
@@ -336,6 +344,7 @@ export class JiraClient {
 	 * @param {Object} [options] - Additional options
 	 * @param {number} [options.maxResults=100] - Maximum number of results to return
 	 * @param {boolean} [options.expand=true] - Whether to expand fields like renderedFields
+	 * @param {boolean} [options.includeComments=false] - Whether to fetch and include comments
 	 * @param {Object} [options.log] - Logger object
 	 * @returns {Promise<{success: boolean, data: JiraTicket[], error: Object}>} - Result with success status and array of JiraTicket objects
 	 */
@@ -348,6 +357,8 @@ export class JiraClient {
 		};
 		const maxResults = options.maxResults || 100;
 		const expand = options.expand !== undefined ? options.expand : true;
+		const includeComments =
+			options.includeComments !== undefined ? options.includeComments : false;
 
 		try {
 			if (!this.isReady()) {
@@ -357,15 +368,20 @@ export class JiraClient {
 				);
 			}
 
-			log.info?.(`Searching Jira issues with JQL: ${jql}`);
+			log.info?.(`Searching Jira issues with JQL: ${jql}${includeComments ? ' (including comments)' : ''}`);
+
+			// Build fields list based on options
+			let fields = 'summary,description,status,priority,issuetype,parent,issuelinks,subtasks,attachment';
+			if (includeComments) {
+				fields += ',comment';
+			}
 
 			const client = this.getClient();
 			const response = await client.get('/rest/api/3/search', {
 				params: {
 					jql,
 					maxResults,
-					fields:
-						'summary,description,status,priority,issuetype,parent,issuelinks,subtasks,attachment',
+					fields: fields,
 					...(expand ? { expand: 'renderedFields' } : {})
 				}
 			});
@@ -706,6 +722,99 @@ export class JiraClient {
 	}
 
 	/**
+	 * Fetch comments for a Jira issue
+	 * @param {string} issueKey - The Jira issue key
+	 * @param {Object} [options] - Additional options
+	 * @param {Object} [options.log] - Logger object
+	 * @param {number} [options.maxResults=50] - Maximum number of comments to fetch
+	 * @param {string} [options.orderBy='created'] - Order comments by 'created' or '-created' (newest first)
+	 * @returns {Promise<Object>} - Result with success status and comments data
+	 */
+	async fetchComments(issueKey, options = {}) {
+		const log = options.log || {
+			info: () => {},
+			warn: () => {},
+			error: () => {},
+			debug: () => {}
+		};
+		const maxResults = options.maxResults || 50;
+		const orderBy = options.orderBy || 'created';
+
+		try {
+			if (!this.isReady()) {
+				return this.createErrorResponse(
+					'JIRA_NOT_ENABLED',
+					'Jira integration is not properly configured'
+				);
+			}
+
+			if (!issueKey) {
+				return this.createErrorResponse(
+					'JIRA_INVALID_INPUT',
+					'Issue key is required'
+				);
+			}
+
+			log.info?.(`Fetching comments for issue: ${issueKey}`);
+
+			const client = this.getClient();
+			const response = await client.get(`/rest/api/3/issue/${issueKey}/comment`, {
+				params: {
+					maxResults,
+					orderBy,
+					expand: 'renderedBody'
+				}
+			});
+
+			if (!response.data) {
+				return this.createErrorResponse(
+					'JIRA_INVALID_RESPONSE',
+					'No comments data received from Jira API'
+				);
+			}
+
+			const comments = response.data.comments || [];
+
+			// Process comments using JiraTicket's extraction method
+			const { JiraTicket } = await import('./jira-ticket.js');
+			const formattedComments = JiraTicket.extractCommentsFromJira(comments);
+
+			return {
+				success: true,
+				data: {
+					issueKey: issueKey,
+					comments: formattedComments,
+					totalComments: response.data.total || comments.length,
+					maxResults: response.data.maxResults || maxResults,
+					startAt: response.data.startAt || 0
+				}
+			};
+		} catch (error) {
+			// If the issue doesn't have comments or they're not accessible, return empty array instead of error
+			if (error.response?.status === 404) {
+				log.info?.(`No comments found for issue ${issueKey}`);
+				return {
+					success: true,
+					data: {
+						issueKey: issueKey,
+						comments: [],
+						totalComments: 0,
+						maxResults: maxResults,
+						startAt: 0
+					}
+				};
+			}
+
+			log.error?.(`Error fetching comments: ${error.message}`);
+			return this.createErrorResponse(
+				'JIRA_REQUEST_ERROR',
+				`Failed to fetch comments: ${error.message}`,
+				error.response?.data
+			);
+		}
+	}
+
+	/**
 	 * Fetch attachment metadata without downloading the full content
 	 * @param {string} issueKey - The Jira issue key
 	 * @param {Object} [options] - Additional options
@@ -1017,6 +1126,74 @@ export class JiraClient {
 			return this.createErrorResponse(
 				'JIRA_REQUEST_ERROR',
 				`Failed to fetch attachments: ${error.message}`,
+				error.response?.data
+			);
+		}
+	}
+
+	/**
+	 * Fetch remote links for a Jira issue
+	 * @param {string} issueKey - The Jira issue key
+	 * @param {Object} [options] - Additional options
+	 * @param {Object} [options.log] - Logger object
+	 * @returns {Promise<Object>} - Result with success status and remote links data
+	 */
+	async fetchRemoteLinks(issueKey, options = {}) {
+		const log = options.log || {
+			info: () => {},
+			warn: () => {},
+			error: () => {},
+			debug: () => {}
+		};
+
+		try {
+			if (!this.isReady()) {
+				return this.createErrorResponse(
+					'JIRA_NOT_ENABLED',
+					'Jira integration is not properly configured'
+				);
+			}
+
+			if (!issueKey) {
+				return this.createErrorResponse(
+					'JIRA_INVALID_INPUT',
+					'Issue key is required'
+				);
+			}
+
+			log.info?.(`Fetching remote links for issue: ${issueKey}`);
+
+			const client = this.getClient();
+			const response = await client.get(`/rest/api/3/issue/${issueKey}/remotelink`);
+
+			if (!response.data) {
+				return this.createErrorResponse(
+					'JIRA_INVALID_RESPONSE',
+					'No remote links data received from Jira API'
+				);
+			}
+
+			// response.data should be an array of remote link objects
+			const remoteLinks = Array.isArray(response.data) ? response.data : [];
+
+			return {
+				success: true,
+				data: remoteLinks
+			};
+		} catch (error) {
+			// If the issue doesn't have remote links or they're not accessible, return empty array instead of error
+			if (error.response?.status === 404) {
+				log.info?.(`No remote links found for issue ${issueKey}`);
+				return {
+					success: true,
+					data: []
+				};
+			}
+
+			log.error?.(`Error fetching remote links: ${error.message}`);
+			return this.createErrorResponse(
+				'JIRA_REQUEST_ERROR',
+				`Failed to fetch remote links: ${error.message}`,
 				error.response?.data
 			);
 		}

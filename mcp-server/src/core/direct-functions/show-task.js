@@ -109,12 +109,22 @@ export async function showTaskDirect(args, log) {
  * @param {string} args.id - The Jira issue key to show details for.
  * @param {boolean} [args.withSubtasks=false] - If true, will fetch subtasks for the parent task
  * @param {boolean} [args.includeImages=true] - If true, will fetch and include image attachments
+ * @param {boolean} [args.includeComments=false] - If true, will fetch and include comments
+ * @param {boolean} [args.includeContext=false] - If true, will include related tickets and PR context
+ * @param {number} [args.maxRelatedTickets=10] - Maximum number of related tickets to fetch in context
  * @param {Object} log - Logger object
  * @returns {Promise<Object>} - Task details result { success: boolean, data?: any, error?: { code: string, message: string } }
  */
 export async function showJiraTaskDirect(args, log) {
 	// Destructure expected args
-	const { id, includeImages = true } = args;
+	const {
+		id,
+		includeImages = true,
+		includeComments = false,
+		includeContext = false,
+		withSubtasks = false,
+		maxRelatedTickets = 10
+	} = args;
 
 	// Validate task ID
 	const taskId = id;
@@ -134,15 +144,15 @@ export async function showJiraTaskDirect(args, log) {
 		enableSilentMode();
 
 		log.info(
-			`Retrieving task details for Jira issue: ${taskId}${includeImages === false ? ' (excluding images)' : ''}`
+			`Retrieving task details for Jira issue: ${taskId}${includeImages === false ? ' (excluding images)' : ''}${includeComments ? ' (including comments)' : ''}`
 		);
 
 		// Use the dedicated function from jira-utils.js to fetch task details
 		const jiraTaskResult = await fetchJiraTaskDetails(
 			taskId,
-			args.withSubtasks,
+			withSubtasks,
 			log,
-			{ includeImages }
+			{ includeImages, includeComments, includeContext, maxRelatedTickets, maxTokens: 40000 }
 		);
 
 		// Restore normal logging before returning

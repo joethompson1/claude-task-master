@@ -98,6 +98,13 @@ export function registerListTasksTool(server) {
 					.describe(
 						'Include subtasks nested within their parent tasks in the response'
 					),
+				includeComments: z
+					.boolean()
+					.optional()
+					.default(false)
+					.describe(
+						'Include comments for each task (default: false)'
+					),
 				parentKey: z
 					.string()
 					.optional()
@@ -111,6 +118,7 @@ export function registerListTasksTool(server) {
 						{
 							status: args.status,
 							withSubtasks: args.withSubtasks,
+							includeComments: args.includeComments,
 							parentKey: args.parentKey || null
 						},
 						log

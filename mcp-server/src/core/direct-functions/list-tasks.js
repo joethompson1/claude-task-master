@@ -20,7 +20,7 @@ import { JiraClient } from '../utils/jira-client.js';
  */
 export async function listTasksDirect(args, log) {
 	// Destructure the explicit tasksJsonPath from args
-	const { tasksJsonPath, status, withSubtasks, parentKey } = args;
+	const { tasksJsonPath, status, withSubtasks, parentKey, includeComments } = args;
 
 	if (!JiraClient.isJiraEnabled() && !tasksJsonPath) {
 		log.error(
@@ -39,8 +39,9 @@ export async function listTasksDirect(args, log) {
 	// Use the explicit tasksJsonPath for cache key (or parentKey for Jira)
 	const statusFilter = status || 'all';
 	const withSubtasksFilter = withSubtasks || false;
+	const includeCommentsFilter = includeComments || false;
 	const cacheKey = JiraClient.isJiraEnabled()
-		? `listTasks:jira:${parentKey}:${statusFilter}:${withSubtasksFilter}`
+		? `listTasks:jira:${parentKey}:${statusFilter}:${withSubtasksFilter}:${includeCommentsFilter}`
 		: `listTasks:${tasksJsonPath}:${statusFilter}:${withSubtasksFilter}`;
 
 	// Define the action function to be executed on cache miss
@@ -51,7 +52,7 @@ export async function listTasksDirect(args, log) {
 
 			log.info(
 				JiraClient.isJiraEnabled()
-					? `Executing core listTasks function for Jira parent: ${parentKey}, filter: ${statusFilter}, subtasks: ${withSubtasksFilter}`
+					? `Executing core listTasks function for Jira parent: ${parentKey}, filter: ${statusFilter}, subtasks: ${withSubtasksFilter}, comments: ${includeCommentsFilter}`
 					: `Executing core listTasks function for path: ${tasksJsonPath}, filter: ${statusFilter}, subtasks: ${withSubtasksFilter}`
 			);
 
@@ -61,7 +62,8 @@ export async function listTasksDirect(args, log) {
 				statusFilter,
 				withSubtasksFilter,
 				{
-					parentKey: parentKey
+					parentKey: parentKey,
+					includeComments: includeCommentsFilter
 				},
 				'json'
 			);

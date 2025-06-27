@@ -17,6 +17,7 @@ import { createJiraIssue } from '../utils/jira-utils.js';
 import { JiraClient } from '../utils/jira-client.js';
 import { JiraTicket } from '../utils/jira-ticket.js';
 import { generateObjectService } from '../../../../scripts/modules/ai-services-unified.js';
+import { prdResponseSchema } from '../../../../scripts/modules/task-manager/parse-prd.js';
 
 /**
  * Direct function wrapper for parsing PRD documents and generating tasks.
@@ -249,7 +250,7 @@ export async function parsePRDWithJiraDirect(args, log, context = {}) {
 		const systemPrompt = `You are an AI assistant specialized in analyzing Product Requirements Documents (PRDs) and generating a structured, logically ordered, dependency-aware and sequenced list of development tasks in JSON format.
 Analyze the provided PRD content and generate approximately ${numTasks} top-level development tasks. If the complexity or the level of detail of the PRD is high, generate more tasks relative to the complexity of the PRD
 Each task should represent a logical unit of work needed to implement the requirements and focus on the most direct and effective way to implement the requirements without unnecessary complexity or overengineering. Include pseudo-code, implementation details, and test strategy for each task. Find the most up to date information to implement each task.
-Assign sequential IDs starting from ${nextId}. Infer title, description, details, and test strategy for each task based *only* on the PRD content.
+Infer title, description, details, and test strategy for each task based *only* on the PRD content.
 Set status to 'pending', dependencies to an empty array [], and priority to 'medium' initially for all tasks.
 Respond ONLY with a valid JSON object containing a single key "tasks", where the value is an array of task objects adhering to the provided Zod schema. Do not include any explanation or markdown formatting.
 
@@ -267,12 +268,12 @@ Each task should follow this JSON structure:
 },
 
 Guidelines:
-1. Unless complexity warrants otherwise, create exactly ${numTasks} tasks, numbered sequentially starting from ${nextId}
+1. Unless complexity warrants otherwise, create exactly ${numTasks} tasks
 2. Each task should be atomic and focused on a single responsibility following the most up to date best practices and standards
 3. Order tasks logically - consider dependencies and implementation sequence
 4. Early tasks should focus on setup, core functionality first, then advanced features
 5. Include clear validation/testing approach for each task
-6. Set appropriate dependency IDs (a task can only depend on tasks with lower IDs, potentially including existing tasks with IDs less than ${nextId} if applicable)
+6. Set appropriate dependency IDs
 7. Assign priority (high/medium/low) based on criticality and dependency order
 8. Include detailed implementation guidance in the "details" field
 9. If the PRD contains specific requirements for libraries, database schemas, frameworks, tech stacks, or any other implementation details, STRICTLY ADHERE to these requirements in your task breakdown and do not discard them under any circumstance
@@ -280,7 +281,7 @@ Guidelines:
 11. Always aim to provide the most direct path to implementation, avoiding over-engineering or roundabout approaches`;
 
 		// Build user prompt with PRD content
-		const userPrompt = `Here's the Product Requirements Document (PRD) to break down into approximately ${numTasks} tasks, starting IDs from ${nextId}:\n\n${prdContent}\n\n
+		const userPrompt = `Here's the Product Requirements Document (PRD) to break down into approximately ${numTasks} tasks:\n\n${prdContent}\n\n
 
 		Return your response in this format:
 {
@@ -296,7 +297,6 @@ Guidelines:
     "metadata": {
         "projectName": "PRD Implementation",
         "totalTasks": ${numTasks},
-        "sourceFile": "${prdPath}",
         "generatedAt": "YYYY-MM-DD"
     }
 }`;
@@ -305,12 +305,10 @@ Guidelines:
 		const generatedData = await generateObjectService({
 			role: 'main',
 			session: session,
-			projectRoot: projectRoot,
 			schema: prdResponseSchema,
 			objectName: 'tasks_data',
 			systemPrompt: systemPrompt,
 			prompt: userPrompt,
-			reportProgress
 		});
 
 		// Validate and Process Tasks

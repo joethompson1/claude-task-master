@@ -112,72 +112,72 @@ export function registerExpandAllTool(server) {
 			})
 		});
 	} else {
-		// Register the Jira-specific version of the expand_all tool
-		server.addTool({
-			name: 'expand_all_jira',
-			description: 'Expand all pending Jira tasks into subtasks',
-			parameters: z.object({
-				num: z
-					.string()
-					.optional()
-					.describe('Number of subtasks to generate for each task'),
-				research: z
-					.boolean()
-					.optional()
-					.describe(
-						'Enable Perplexity AI for research-backed subtask generation'
-					),
-				prompt: z
-					.string()
-					.optional()
-					.describe('Additional context to guide subtask generation'),
-				force: z
-					.boolean()
-					.optional()
-					.describe(
-						'Force regeneration of subtasks for tasks that already have them'
-					),
-				parentKey: z
-					.string()
-					.optional()
-					.describe('Parent Jira issue key to filter tasks')
-			}),
-			execute: async (args, { log, session }) => {
-				try {
-					log.info(
-						`Expanding all Jira tasks with args: ${JSON.stringify(args)}`
-					);
+	// 	// Register the Jira-specific version of the expand_all tool
+	// 	server.addTool({
+	// 		name: 'expand_all_jira',
+	// 		description: 'Expand all pending Jira tasks into subtasks',
+	// 		parameters: z.object({
+	// 			num: z
+	// 				.string()
+	// 				.optional()
+	// 				.describe('Number of subtasks to generate for each task'),
+	// 			research: z
+	// 				.boolean()
+	// 				.optional()
+	// 				.describe(
+	// 					'Enable Perplexity AI for research-backed subtask generation'
+	// 				),
+	// 			prompt: z
+	// 				.string()
+	// 				.optional()
+	// 				.describe('Additional context to guide subtask generation'),
+	// 			force: z
+	// 				.boolean()
+	// 				.optional()
+	// 				.describe(
+	// 					'Force regeneration of subtasks for tasks that already have them'
+	// 				),
+	// 			parentKey: z
+	// 				.string()
+	// 				.optional()
+	// 				.describe('Parent Jira issue key to filter tasks')
+	// 		}),
+	// 		execute: async (args, { log, session }) => {
+	// 			try {
+	// 				log.info(
+	// 					`Expanding all Jira tasks with args: ${JSON.stringify(args)}`
+	// 				);
 
-					// Call the direct function with only session in context
-					const result = await expandAllJiraTasksDirect(
-						{
-							// Pass relevant args
-							parentKey: args.parentKey,
-							num: args.num,
-							research: args.research,
-							prompt: args.prompt,
-							force: args.force
-						},
-						log,
-						{ session }
-					);
+	// 				// Call the direct function with only session in context
+	// 				const result = await expandAllJiraTasksDirect(
+	// 					{
+	// 						// Pass relevant args
+	// 						parentKey: args.parentKey,
+	// 						num: args.num,
+	// 						research: args.research,
+	// 						prompt: args.prompt,
+	// 						force: args.force
+	// 					},
+	// 					log,
+	// 					{ session }
+	// 				);
 
-					if (result.success) {
-						log.info(
-							`Successfully expanded all Jira tasks: ${result.data.message}`
-						);
-					} else {
-						log.error(
-							`Failed to expand all Jira tasks: ${result.error?.message || 'Unknown error'}`
-						);
-					}
+	// 				if (result.success) {
+	// 					log.info(
+	// 						`Successfully expanded all Jira tasks: ${result.data.message}`
+	// 					);
+	// 				} else {
+	// 					log.error(
+	// 						`Failed to expand all Jira tasks: ${result.error?.message || 'Unknown error'}`
+	// 					);
+	// 				}
 
-					return handleApiResult(result, log, 'Error expanding all Jira tasks');
-				} catch (error) {
-					log.error(`Error in expand-all-jira tool: ${error.message}`);
-					return createErrorResponse(error.message);
-				}
-			}
-		});
+	// 				return handleApiResult(result, log, 'Error expanding all Jira tasks');
+	// 			} catch (error) {
+	// 				log.error(`Error in expand-all-jira tool: ${error.message}`);
+	// 				return createErrorResponse(error.message);
+	// 			}
+	// 		}
+	// 	});
 	}
 }
