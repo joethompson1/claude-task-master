@@ -10,7 +10,7 @@ import { registerParsePRDTool } from './parse-prd.js';
 import { registerUpdateTool } from './update.js';
 import { registerUpdateTaskTool } from './update-task.js';
 import { registerUpdateSubtaskTool } from './update-subtask.js';
-import { registerGenerateTool } from './generate.js';
+// import { registerGenerateTool } from './generate.js';
 import { registerShowTaskTool } from './get-task.js';
 import { registerNextTaskTool } from './next-task.js';
 import { registerExpandTaskTool } from './expand-task.js';
@@ -52,7 +52,7 @@ export function registerTaskMasterTools(server) {
 
 		// Group 3: Task Status & Management
 		registerSetTaskStatusTool(server);
-		registerGenerateTool(server);
+		// registerGenerateTool(server);
 
 		// Group 4: Task Creation & Modification
 		registerAddTaskTool(server);
