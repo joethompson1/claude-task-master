@@ -38,6 +38,7 @@ async function listTasks(
 		// Extract options
 		const source = options.source || 'local';
 		const parentKey = options.parentKey;
+		const includeComments = options.includeComments || false;
 
 		// Only display banner for text output
 		if (outputFormat === 'text') {
@@ -63,6 +64,9 @@ async function listTasks(
 					error: (msg) => log('error', msg),
 					warn: (msg) => log('warn', msg),
 					debug: (msg) => log('debug', msg)
+				},
+				{
+					includeComments
 				}
 			);
 

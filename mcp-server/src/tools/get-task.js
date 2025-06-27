@@ -116,6 +116,13 @@ export function registerShowTaskTool(server) {
 					.describe(
 						'If true, will fetch and include image attachments (default: true)'
 					),
+				includeComments: z
+					.boolean()
+					.optional()
+					.default(false)
+					.describe(
+						'If true, will fetch and include comments (default: false)'
+					),
 				includeContext: z
 					.boolean()
 					.optional()
@@ -133,7 +140,7 @@ export function registerShowTaskTool(server) {
 				log.info(`Session object received in execute: ${JSON.stringify(session)}`);
 
 				try {
-					log.info(`Getting Jira task details for ID: ${args.id}${args.includeImages === false ? ' (excluding images)' : ''}${args.includeContext === false ? ' (excluding context)' : args.maxRelatedTickets !== 10 ? ` (max ${args.maxRelatedTickets} related)` : ''}`);
+					log.info(`Getting Jira task details for ID: ${args.id}${args.includeImages === false ? ' (excluding images)' : ''}${args.includeComments ? ' (including comments)' : ''}${args.includeContext === false ? ' (excluding context)' : args.maxRelatedTickets !== 10 ? ` (max ${args.maxRelatedTickets} related)` : ''}`);
 
 					// Get the base task data first, now with context handling inside
 					const result = await showJiraTaskDirect(
@@ -141,6 +148,7 @@ export function registerShowTaskTool(server) {
 							id: args.id,
 							withSubtasks: args.withSubtasks,
 							includeImages: args.includeImages,
+							includeComments: args.includeComments,
 							includeContext: args.includeContext,
 							maxRelatedTickets: args.maxRelatedTickets
 						},

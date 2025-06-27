@@ -30,6 +30,7 @@ export class JiraTicket {
 	 * @param {string} [data.jiraKey] - Existing Jira key (for updates)
 	 * @param {string} [data.status] - Ticket status
 	 * @param {Array<Object>} [data.attachments=[]] - Array of attachment objects
+	 * @param {Array<string>} [data.comments=[]] - Array of comment strings
 	 */
 	constructor(data = {}) {
 		this.title = data.title || '';
@@ -48,6 +49,7 @@ export class JiraTicket {
 		this.dependencies = data.dependencies || [];
 		this.status = data.status || '';
 		this.attachments = data.attachments || [];
+		this.comments = data.comments || [];
 		this.relatedContext = data.relatedContext || null;
 	}
 
@@ -67,6 +69,7 @@ export class JiraTicket {
 	 * @param {string} [data.jiraKey] - Existing Jira key (for updates)
 	 * @param {Array<string>} [data.dependencies] - Array of issue keys this ticket depends on
 	 * @param {string} [data.status] - Ticket status
+	 * @param {Array<Object>} [data.comments] - Array of comment objects
 	 * @returns {JiraTicket} - This instance for chaining
 	 */
 	update(data = {}) {
@@ -133,6 +136,10 @@ export class JiraTicket {
 			this.attachments = Array.isArray(data.attachments)
 				? data.attachments
 				: [];
+		}
+
+		if (data.comments !== undefined) {
+			this.comments = Array.isArray(data.comments) ? data.comments : [];
 		}
 
 		if (data.relatedContext !== undefined) {
@@ -705,6 +712,7 @@ export class JiraTicket {
 			jiraKey: this.jiraKey,
 			parentKey: this.parentKey,
 			attachments: this.attachments,
+			comments: this.comments,
 			issueType: this.issueType
 		};
 
@@ -1025,6 +1033,38 @@ export class JiraTicket {
 	}
 
 	/**
+	 * Extract and format comments from Jira comment objects
+	 * @param {Array} comments - Array of Jira comment objects
+	 * @returns {Array} - Array of formatted comment objects
+	 */
+	static extractCommentsFromJira(comments) {
+		if (!comments || !Array.isArray(comments)) {
+			return [];
+		}
+
+		return comments.map(comment => {
+			// Extract comment text from ADF format
+			let commentText = '';
+			if (comment.body && comment.body.content) {
+				commentText = JiraTicket.extractTextFromNodes(comment.body.content).trim();
+			}
+
+			return {
+				id: comment.id,
+				author: {
+					accountId: comment.author?.accountId || '',
+					displayName: comment.author?.displayName || 'Unknown User',
+					emailAddress: comment.author?.emailAddress || ''
+				},
+				body: commentText,
+				created: comment.created,
+				updated: comment.updated,
+				visibility: comment.visibility || null
+			};
+		});
+	}
+
+	/**
 	 * Convert a string to camelCase
 	 * @param {string} str - String to convert
 	 * @returns {string} - camelCase string
@@ -1187,7 +1227,8 @@ export class JiraTicket {
 			status: jiraIssue.fields?.status?.name || '',
 			dependencies: dependencies,
 			labels: jiraIssue.fields?.labels || [],
-			attachments: jiraIssue.fields?.attachment || []
+			attachments: jiraIssue.fields?.attachment || [],
+			comments: JiraTicket.extractCommentsFromJira(jiraIssue.fields?.comment?.comments || []),
 		});
 
 		// Update ticket with panel data if available

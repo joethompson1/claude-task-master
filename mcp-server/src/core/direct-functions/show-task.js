@@ -109,6 +109,7 @@ export async function showTaskDirect(args, log) {
  * @param {string} args.id - The Jira issue key to show details for.
  * @param {boolean} [args.withSubtasks=false] - If true, will fetch subtasks for the parent task
  * @param {boolean} [args.includeImages=true] - If true, will fetch and include image attachments
+ * @param {boolean} [args.includeComments=false] - If true, will fetch and include comments
  * @param {boolean} [args.includeContext=false] - If true, will include related tickets and PR context
  * @param {number} [args.maxRelatedTickets=10] - Maximum number of related tickets to fetch in context
  * @param {Object} log - Logger object
@@ -119,6 +120,7 @@ export async function showJiraTaskDirect(args, log) {
 	const {
 		id,
 		includeImages = true,
+		includeComments = false,
 		includeContext = false,
 		withSubtasks = false,
 		maxRelatedTickets = 10
@@ -142,7 +144,7 @@ export async function showJiraTaskDirect(args, log) {
 		enableSilentMode();
 
 		log.info(
-			`Retrieving task details for Jira issue: ${taskId}${includeImages === false ? ' (excluding images)' : ''}`
+			`Retrieving task details for Jira issue: ${taskId}${includeImages === false ? ' (excluding images)' : ''}${includeComments ? ' (including comments)' : ''}`
 		);
 
 		// Use the dedicated function from jira-utils.js to fetch task details
@@ -150,7 +152,7 @@ export async function showJiraTaskDirect(args, log) {
 			taskId,
 			withSubtasks,
 			log,
-			{ includeImages, includeContext, maxRelatedTickets, maxTokens: 40000 }
+			{ includeImages, includeComments, includeContext, maxRelatedTickets, maxTokens: 40000 }
 		);
 
 		// Restore normal logging before returning

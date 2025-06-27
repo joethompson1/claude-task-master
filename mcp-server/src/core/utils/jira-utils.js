@@ -383,6 +383,7 @@ function trimResponseForTokenLimit(responseData, maxTokens, log) {
  * @param {Object} log - Logger object
  * @param {Object} [options={}] - Additional options
  * @param {boolean} [options.includeImages=true] - Whether to fetch and include image attachments
+ * @param {boolean} [options.includeComments=false] - Whether to fetch and include comments
  * @param {boolean} [options.includeContext=false] - Whether to fetch and include related context (PRs, etc.)
  * @param {number} [options.maxRelatedTickets=10] - Maximum number of related tickets for context
  * @param {number} [options.maxTokens] - Maximum token count (default: 20000)
@@ -398,6 +399,7 @@ export async function fetchJiraTaskDetails(
 		// Extract options with defaults
 		const {
 			includeImages = true,
+			includeComments = false,
 			includeContext = false,
 			maxRelatedTickets = 5,
 			maxTokens = 40000
@@ -417,14 +419,15 @@ export async function fetchJiraTaskDetails(
 		}
 
 		log.info(
-			`Fetching Jira task details for key: ${taskId}${includeImages === false ? ' (excluding images)' : ''}${maxTokens !== 20000 ? ` (max tokens: ${maxTokens})` : ''}`
+			`Fetching Jira task details for key: ${taskId}${includeImages === false ? ' (excluding images)' : ''}${includeComments ? ' (including comments)' : ''}${maxTokens !== 20000 ? ` (max tokens: ${maxTokens})` : ''}`
 		);
 
-		// Fetch the issue with conditional image fetching
+		// Fetch the issue with conditional image and comment fetching
 		const issueResult = await jiraClient.fetchIssue(taskId, {
 			log,
 			expand: true,
-			includeImages
+			includeImages,
+			includeComments
 		});
 
 		if (!issueResult.success) {
@@ -438,7 +441,7 @@ export async function fetchJiraTaskDetails(
 		if (withSubtasks) {
 			try {
 				// Use existing function to fetch subtasks
-				subtasksData = await fetchTasksFromJira(taskId, withSubtasks, log);
+				subtasksData = await fetchTasksFromJira(taskId, withSubtasks, log, { includeComments });
 			} catch (subtaskError) {
 				log.warn(
 					`Could not fetch subtasks for ${taskId}: ${subtaskError.message}`
@@ -590,10 +593,17 @@ export function createMCPContentWithImages(taskData, textContent = null) {
  * @param {string} parentKey - Parent Jira issue key, if null will fetch all tasks in the project
  * @param {boolean} [withSubtasks=false] - If true, will fetch subtasks for the parent task
  * @param {Object} log - Logger object
+ * @param {Object} [options={}] - Additional options
+ * @param {boolean} [options.includeComments=false] - Whether to fetch and include comments
  * @returns {Promise<Object>} - Tasks and statistics in Task Master format
  */
-export async function fetchTasksFromJira(parentKey, withSubtasks = false, log) {
+export async function fetchTasksFromJira(parentKey, withSubtasks = false, log, options = {}) {
 	try {
+		// Extract options with defaults
+		const {
+			includeComments = false
+		} = options;
+
 		// Check if Jira is enabled using the JiraClient
 		const jiraClient = new JiraClient();
 
@@ -613,12 +623,12 @@ export async function fetchTasksFromJira(parentKey, withSubtasks = false, log) {
 			// If parentKey is provided, get subtasks for the specific parent
 			jql = `project = "${jiraClient.config.project}" AND parent = "${parentKey}" ORDER BY created ASC`;
 			log.info(
-				`Fetching Jira subtasks for parent ${parentKey} with JQL: ${jql}`
+				`Fetching Jira subtasks for parent ${parentKey} with JQL: ${jql}${includeComments ? ' (including comments)' : ''}`
 			);
 		} else {
 			// If no parentKey, get all tasks in the project
 			jql = `project = "${jiraClient.config.project}" ORDER BY created ASC`;
-			log.info(`Fetching all Jira tasks with JQL: ${jql}`);
+			log.info(`Fetching all Jira tasks with JQL: ${jql}${includeComments ? ' (including comments)' : ''}`);
 		}
 
 		// Use the searchIssues method instead of direct HTTP request
@@ -626,6 +636,7 @@ export async function fetchTasksFromJira(parentKey, withSubtasks = false, log) {
 		const searchResult = await jiraClient.searchIssues(jql, {
 			maxResults: 100,
 			expand: true,
+			includeComments,
 			log
 		});
 
@@ -659,7 +670,8 @@ export async function fetchTasksFromJira(parentKey, withSubtasks = false, log) {
 						const subtasksResult = await fetchTasksFromJira(
 							jiraTicket.jiraKey,
 							false,
-							log
+							log,
+							options
 						);
 						if (subtasksResult && subtasksResult.tasks) {
 							task.subtasks = subtasksResult.tasks;
